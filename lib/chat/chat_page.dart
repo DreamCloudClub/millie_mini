@@ -1,0 +1,1200 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:image_picker/image_picker.dart';
+import '../providers/providers.dart';
+import '../models/models.dart';
+import '../utils/constants.dart';
+import '../services/openai_service.dart';
+import '../services/storage_service.dart';
+
+/// Chat input states
+enum ChatInputState {
+  empty,      // No text, show record button
+  recording,  // Recording, show stop + send
+  hasText,    // Has text, show send button
+}
+
+/// Chat/Image mode toggle
+enum ChatMode {
+  text,
+  image,
+}
+
+class ChatPage extends StatefulWidget {
+  final VoidCallback onNavigateToFace;
+  final VoidCallback? onRefresh;
+
+  const ChatPage({
+    super.key,
+    required this.onNavigateToFace,
+    this.onRefresh,
+  });
+
+  @override
+  State<ChatPage> createState() => ChatPageState();
+}
+
+class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
+  final TextEditingController _textController = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController();
+  
+  ChatMode _mode = ChatMode.text;
+  ChatInputState _inputState = ChatInputState.empty;
+  bool _isMuted = false;
+  bool _hasStartedConversation = false;
+  bool _isGeneratingImage = false;
+  
+  // Image mode state - conversation-like structure
+  final List<_ImageConversationItem> _imageConversation = [];
+  File? _selectedImage; // Reference image ready to send
+  String? _currentImagePrompt; // Current prompt being generated
+  final ImagePicker _imagePicker = ImagePicker();
+
+  @override
+  bool get wantKeepAlive => true; // Preserve state when swiping between pages
+  
+  /// Switch to image mode (called from external navigation)
+  void switchToImageMode() {
+    debugPrint('ChatPage: Switching to image mode');
+    setState(() {
+      _mode = ChatMode.image;
+    });
+  }
+  
+  /// Switch to text mode (called from external navigation)
+  void switchToTextMode() {
+    debugPrint('ChatPage: Switching to text mode');
+    setState(() {
+      _mode = ChatMode.text;
+    });
+  }
+
+  int _lastMessageCount = 0;
+  
+  @override
+  void initState() {
+    super.initState();
+    _textController.addListener(_onTextChanged);
+    _focusNode.addListener(_onFocusChanged);
+    
+    // Check if conversation already has messages and set up listener
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final voiceProvider = context.read<VoiceProvider>();
+      if (voiceProvider.conversation != null && 
+          voiceProvider.conversation!.messages.isNotEmpty) {
+        setState(() {
+          _hasStartedConversation = true;
+        });
+        _lastMessageCount = voiceProvider.conversation!.messages.length;
+      }
+      
+      // Listen for new messages to auto-scroll
+      voiceProvider.addListener(_onVoiceProviderChanged);
+    });
+  }
+  
+  void _onVoiceProviderChanged() {
+    final voiceProvider = context.read<VoiceProvider>();
+    final currentCount = voiceProvider.conversation?.messages.length ?? 0;
+    
+    // If message count increased, scroll to bottom
+    if (currentCount > _lastMessageCount) {
+      _lastMessageCount = currentCount;
+      _scrollToBottom();
+    }
+  }
+
+  @override
+  void dispose() {
+    // Remove voice provider listener
+    try {
+      context.read<VoiceProvider>().removeListener(_onVoiceProviderChanged);
+    } catch (_) {
+      // Context may not be available during dispose
+    }
+    _textController.removeListener(_onTextChanged);
+    _textController.dispose();
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    setState(() {
+      if (_textController.text.isNotEmpty) {
+        _inputState = ChatInputState.hasText;
+      } else if (_inputState != ChatInputState.recording) {
+        _inputState = ChatInputState.empty;
+      }
+    });
+  }
+
+  void _onFocusChanged() {
+    // When keyboard opens/closes, we may want to update UI
+    setState(() {});
+  }
+
+  void _toggleMode(ChatMode mode) {
+    setState(() {
+      _mode = mode;
+      // Clear text when switching modes
+      _textController.clear();
+      _inputState = ChatInputState.empty;
+    });
+  }
+
+  void _toggleMute() {
+    setState(() {
+      _isMuted = !_isMuted;
+    });
+  }
+
+  Future<void> _startRecording() async {
+    final voiceProvider = context.read<VoiceProvider>();
+    
+    final path = await voiceProvider.startTranscriptionRecording();
+    if (path != null) {
+      setState(() {
+        _inputState = ChatInputState.recording;
+      });
+      debugPrint('Started recording: $path');
+      
+      // Auto-stop after 20 seconds
+      Future.delayed(const Duration(seconds: 20), () {
+        if (_inputState == ChatInputState.recording) {
+          _stopRecording();
+        }
+      });
+    } else {
+      debugPrint('Failed to start recording');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    if (_inputState != ChatInputState.recording) return;
+    
+    final voiceProvider = context.read<VoiceProvider>();
+    
+    setState(() {
+      _inputState = ChatInputState.hasText;
+      _textController.text = "Transcribing...";
+    });
+    
+    final transcription = await voiceProvider.stopAndTranscribe();
+    
+    if (transcription != null && transcription.isNotEmpty) {
+      setState(() {
+        _textController.text = transcription;
+      });
+      debugPrint('Transcription complete: $transcription');
+    } else {
+      setState(() {
+        _textController.clear();
+        _inputState = ChatInputState.empty;
+      });
+      debugPrint('No transcription received');
+    }
+  }
+
+  Future<void> _sendMessage() async {
+    // If still recording, stop and transcribe first
+    if (_inputState == ChatInputState.recording) {
+      await _stopRecording();
+    }
+
+    // Now check if we have text to send
+    final messageText = _textController.text.trim();
+    if (messageText.isEmpty || messageText == "Transcribing...") return;
+
+    setState(() {
+      _hasStartedConversation = true;
+      _textController.clear();
+      _inputState = ChatInputState.empty;
+    });
+
+    // Hide keyboard
+    _focusNode.unfocus();
+
+    if (_mode == ChatMode.text) {
+      final voiceProvider = context.read<VoiceProvider>();
+      
+      // Send text message (this adds to conversation and calls LLM)
+      await voiceProvider.sendTextMessage(
+        text: messageText,
+        playAudio: !_isMuted,
+      );
+      
+      // Scroll to bottom
+      _scrollToBottom();
+    } else {
+      // Image mode - generate image
+      await _generateImage(messageText);
+    }
+  }
+  
+  Future<void> _generateImage(String prompt) async {
+    // Capture the reference image before clearing it
+    final referenceImage = _selectedImage;
+    
+    setState(() {
+      _isGeneratingImage = true;
+      _currentImagePrompt = prompt;
+      // Add user prompt to conversation
+      _imageConversation.add(_ImageConversationItem.userPrompt(
+        prompt, 
+        referenceImage: referenceImage,
+      ));
+      _selectedImage = null; // Clear reference image after adding to conversation
+      _hasStartedConversation = true;
+    });
+    
+    // Scroll to bottom to show the new prompt
+    _scrollToBottom();
+    
+    try {
+      // Get OpenAI service
+      final storageService = StorageService();
+      await storageService.init();
+      final openaiService = OpenAIService(storageService);
+      
+      // Get previous prompt for context (helps maintain style continuity)
+      String? previousPrompt;
+      for (int i = _imageConversation.length - 2; i >= 0; i--) {
+        if (_imageConversation[i].isUser && _imageConversation[i].text != null) {
+          previousPrompt = _imageConversation[i].text;
+          break;
+        }
+      }
+      
+      // Generate image with optional reference image and previous context
+      final imageUrl = await openaiService.generateImage(
+        prompt: prompt,
+        referenceImage: referenceImage,
+        previousPrompt: previousPrompt,
+      );
+      
+      if (imageUrl != null) {
+        setState(() {
+          // Add AI image response to conversation
+          _imageConversation.add(_ImageConversationItem.aiImage(imageUrl));
+        });
+        debugPrint('Image generated: $imageUrl');
+        _scrollToBottom();
+        // Scroll again after image likely loads
+        Future.delayed(const Duration(milliseconds: 500), _scrollToBottom);
+      } else {
+        debugPrint('Failed to generate image');
+      }
+    } catch (e) {
+      debugPrint('Error generating image: $e');
+    } finally {
+      setState(() {
+        _isGeneratingImage = false;
+        _currentImagePrompt = null;
+      });
+    }
+  }
+
+  void _openCamera() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.faceBackground,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpacing.lg),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.white),
+              title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.white),
+              title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? pickedFile = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+      
+      if (pickedFile != null) {
+        setState(() {
+          _selectedImage = File(pickedFile.path);
+          _hasStartedConversation = true;
+        });
+        debugPrint('Image selected: ${pickedFile.path}');
+      }
+    } catch (e) {
+      debugPrint('Error picking image: $e');
+    }
+  }
+
+  void _scrollToBottom() {
+    // Use a slight delay to ensure content is laid out before scrolling
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    return Scaffold(
+      backgroundColor: AppColors.faceBackground,
+      resizeToAvoidBottomInset: true,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top bar with navigation and toggle
+            _buildTopBar(),
+            
+            // Main content area with persistent rounded container
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.15),
+                    width: 1,
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(15),
+                  child: _mode == ChatMode.text
+                      ? Consumer<VoiceProvider>(
+                          builder: (context, voiceProvider, _) {
+                            // Text mode: show chat when there are messages
+                            final hasMessages = voiceProvider.conversation?.messages.isNotEmpty ?? false;
+                            return hasMessages
+                                ? _buildChatView()
+                                : _buildInitialView();
+                          },
+                        )
+                      : Builder(
+                          builder: (context) {
+                            // Image mode: show conversation or initial view
+                            final hasContent = _imageConversation.isNotEmpty || _selectedImage != null;
+                            return hasContent
+                                ? _buildImageView()
+                                : _buildInitialView();
+                          },
+                        ),
+                ),
+              ),
+            ),
+            
+            // Input bar at bottom
+            _buildInputBar(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          // Refresh button (left) - green
+          _NavigationButton(
+            icon: Icons.refresh,
+            onTap: _handleRefresh,
+            backgroundColor: Colors.green,
+            iconColor: Colors.white,
+          ),
+          
+          const Spacer(),
+          
+          // Mode toggle (center)
+          _ModeToggle(
+            currentMode: _mode,
+            onModeChanged: _toggleMode,
+          ),
+          
+          const Spacer(),
+          
+          // Back to Face (right arrow) - orange
+          _NavigationButton(
+            icon: Icons.arrow_forward,
+            onTap: widget.onNavigateToFace,
+            backgroundColor: AppColors.primaryOrange,
+            iconColor: Colors.white,
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _handleRefresh() {
+    if (_mode == ChatMode.image) {
+      // Image mode: Only clear image conversation (independent context)
+      setState(() {
+        _imageConversation.clear();
+        _selectedImage = null;
+        _currentImagePrompt = null;
+        _textController.clear();
+        _inputState = ChatInputState.empty;
+      });
+      debugPrint('Image mode refresh: Cleared image conversation only');
+    } else {
+      // Text mode: Clear text input and refresh voice/text conversation
+      setState(() {
+        _hasStartedConversation = false;
+        _textController.clear();
+        _inputState = ChatInputState.empty;
+      });
+      // Call parent refresh to clear voice conversation (synced with face page)
+      widget.onRefresh?.call();
+      debugPrint('Text mode refresh: Cleared text/voice conversation');
+    }
+  }
+
+  Widget _buildInitialView() {
+    final title = _mode == ChatMode.text 
+        ? 'Millie Mini AI' 
+        : 'Millie Mini Artist';
+    final subtitle = _mode == ChatMode.text
+        ? 'How can I help you?'
+        : 'What can I create for you?';
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Millie logo/icon with white border
+          Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: Colors.white,
+                width: 1,
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(23), // Slightly smaller to fit inside border
+              child: Image.asset(
+                'assets/icon/icon.png',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  // Fallback if image not found
+                  return Icon(
+                    _mode == ChatMode.text ? Icons.chat : Icons.palette,
+                    size: 60,
+                    color: Colors.white,
+                  );
+                },
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: AppSpacing.lg),
+          
+          // Title
+          Text(
+            title,
+            style: const TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          
+          const SizedBox(height: AppSpacing.sm),
+          
+          // Subtitle
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 16,
+              color: Colors.white.withOpacity(0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConversationView() {
+    if (_mode == ChatMode.text) {
+      return _buildChatView();
+    } else {
+      return _buildImageView();
+    }
+  }
+
+  Widget _buildChatView() {
+    return Consumer<VoiceProvider>(
+      builder: (context, voiceProvider, _) {
+        final messages = voiceProvider.conversation?.messages ?? [];
+        
+        return ListView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md + 16, // Extra bottom padding to appear above rounded border
+          ),
+          itemCount: messages.length,
+          itemBuilder: (context, index) {
+            final message = messages[index];
+            final isUser = message.role == MessageRole.user;
+            
+            return _ChatBubble(
+              message: message.content,
+              isUser: isUser,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildImageView() {
+    // Build list of items to display (conversation + pending reference image + loading)
+    final List<Widget> items = [];
+    
+    // Add conversation items
+    for (final item in _imageConversation) {
+      if (item.isUser) {
+        // User prompt - right-aligned bubble with optional reference image
+        items.add(_buildUserPromptBubble(item.text ?? '', item.referenceImage));
+      } else {
+        // AI image response - full width
+        items.add(_buildGeneratedImage(item.imageUrl!));
+      }
+    }
+    
+    // Show loading indicator if generating
+    if (_isGeneratingImage) {
+      items.add(_buildImageLoadingIndicator());
+    }
+    
+    // Show pending reference image (user is composing a prompt)
+    if (_selectedImage != null && !_isGeneratingImage) {
+      items.add(_buildPendingReferenceImage());
+    }
+    
+    if (items.isEmpty) {
+      return Center(
+        child: Text(
+          'Your generated images will appear here',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.5),
+            fontSize: 16,
+          ),
+        ),
+      );
+    }
+    
+    return ListView(
+      controller: _scrollController,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      children: items,
+    );
+  }
+  
+  /// Build a user prompt bubble (right-aligned) with optional reference image
+  Widget _buildUserPromptBubble(String text, File? referenceImage) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Prompt text bubble (right-aligned)
+          Flexible(
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm + 2,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFF4A4A4A), // Medium grey
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: const Radius.circular(16),
+                  bottomRight: const Radius.circular(4),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Reference image thumbnail if present
+                  if (referenceImage != null) ...[
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(
+                          referenceImage,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                  ],
+                  // Prompt text
+                  Text(
+                    text,
+                    style: const TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  /// Build a generated image (full width, square aspect ratio for DALL-E)
+  Widget _buildGeneratedImage(String imageUrl) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: AspectRatio(
+          aspectRatio: 1.0, // DALL-E generates square images
+          child: Image.network(
+            imageUrl,
+            fit: BoxFit.cover,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) {
+                // Image loaded - scroll to show it
+                WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+                return child;
+              }
+              return Container(
+                color: Colors.white.withOpacity(0.1),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    value: loadingProgress.expectedTotalBytes != null
+                        ? loadingProgress.cumulativeBytesLoaded /
+                            loadingProgress.expectedTotalBytes!
+                        : null,
+                    color: Colors.white,
+                  ),
+                ),
+              );
+            },
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              color: Colors.white.withOpacity(0.1),
+              child: const Center(
+                child: Icon(
+                  Icons.error_outline,
+                  color: Colors.white54,
+                  size: 48,
+                ),
+              ),
+            );
+          },
+          ),
+        ),
+      ),
+    );
+  }
+  
+  /// Build loading indicator while generating image
+  Widget _buildImageLoadingIndicator() {
+    return Container(
+      height: 200,
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(color: Colors.white),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'Generating image...',
+              style: TextStyle(
+                fontFamily: AppTextStyles.fontFamily,
+                fontSize: 14,
+                color: Colors.white.withOpacity(0.6),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  /// Build pending reference image (shown when user is composing)
+  Widget _buildPendingReferenceImage() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.3),
+                width: 2,
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.file(
+                _selectedImage!,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputBar() {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end, // Align buttons to bottom
+        children: [
+          // Left button (mute/camera/stop)
+          _buildLeftButton(),
+          
+          const SizedBox(width: AppSpacing.sm),
+          
+          // Text input field
+          Expanded(
+            child: _buildTextField(),
+          ),
+          
+          const SizedBox(width: AppSpacing.sm),
+          
+          // Right button (record/send)
+          _buildRightButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLeftButton() {
+    if (_inputState == ChatInputState.recording) {
+      // Stop button during recording - grey style like nav buttons
+      return _InputButton(
+        icon: Icons.stop,
+        onTap: _stopRecording,
+        backgroundColor: Colors.white.withOpacity(0.1),
+        iconColor: Colors.white,
+      );
+    }
+    
+    if (_mode == ChatMode.text) {
+      // Mute button for text mode - dark grey like search bar X button
+      return _InputButton(
+        icon: _isMuted ? Icons.volume_off : Icons.volume_up,
+        onTap: _toggleMute,
+        backgroundColor: Colors.grey.shade700,
+        iconColor: Colors.white,
+      );
+    } else {
+      // Camera button for image mode - dark grey like search bar X button
+      return _InputButton(
+        icon: Icons.camera_alt,
+        onTap: _openCamera,
+        backgroundColor: Colors.grey.shade700,
+        iconColor: Colors.white,
+      );
+    }
+  }
+
+  Widget _buildTextField() {
+    String placeholder;
+    if (_inputState == ChatInputState.recording) {
+      placeholder = '🔴 Recording...';
+    } else if (_mode == ChatMode.text) {
+      placeholder = 'Type or speak...';
+    } else {
+      placeholder = 'Describe your image...';
+    }
+
+    return Container(
+      constraints: const BoxConstraints(
+        minHeight: 48, // Match button height exactly
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Center(
+        child: TextField(
+          controller: _textController,
+          focusNode: _focusNode,
+          enabled: _inputState != ChatInputState.recording,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+          ),
+          minLines: 1,
+          maxLines: 10,
+          textAlignVertical: TextAlignVertical.center,
+          decoration: InputDecoration(
+            hintText: placeholder,
+            hintStyle: TextStyle(
+              color: _inputState == ChatInputState.recording 
+                  ? Colors.red.withOpacity(0.8)
+                  : Colors.white.withOpacity(0.5),
+            ),
+            border: InputBorder.none,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+            ),
+          ),
+          textInputAction: TextInputAction.newline,
+          keyboardType: TextInputType.multiline,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRightButton() {
+    if (_inputState == ChatInputState.empty) {
+      // Record button when empty - white with black icon
+      return _InputButton(
+        icon: Icons.mic,
+        onTap: _startRecording,
+      );
+    } else {
+      // Send button when has text or recording - white with black icon
+      return _InputButton(
+        icon: Icons.send,
+        onTap: _sendMessage,
+      );
+    }
+  }
+}
+
+/// Navigation button for top bar
+class _NavigationButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color? backgroundColor;
+  final Color? iconColor;
+
+  const _NavigationButton({
+    required this.icon,
+    required this.onTap,
+    this.backgroundColor,
+    this.iconColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: backgroundColor ?? Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          icon,
+          color: iconColor ?? Colors.white,
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
+/// Mode toggle switch
+class _ModeToggle extends StatelessWidget {
+  final ChatMode currentMode;
+  final ValueChanged<ChatMode> onModeChanged;
+
+  const _ModeToggle({
+    required this.currentMode,
+    required this.onModeChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ToggleOption(
+            icon: Icons.chat_bubble_outline,
+            label: 'Text',
+            isSelected: currentMode == ChatMode.text,
+            onTap: () => onModeChanged(ChatMode.text),
+          ),
+          const SizedBox(width: 4),
+          _ToggleOption(
+            icon: Icons.palette_outlined,
+            label: 'Image',
+            isSelected: currentMode == ChatMode.image,
+            onTap: () => onModeChanged(ChatMode.image),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Individual toggle option
+class _ToggleOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ToggleOption({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.blue : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontFamily: AppTextStyles.fontFamily,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Input button (customizable colors)
+class _InputButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color? backgroundColor;
+  final Color? iconColor;
+
+  const _InputButton({
+    required this.icon,
+    required this.onTap,
+    this.backgroundColor,
+    this.iconColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: backgroundColor ?? Colors.white,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          color: iconColor ?? Colors.black,
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
+/// Chat message bubble
+class _ChatBubble extends StatelessWidget {
+  final String message;
+  final bool isUser;
+
+  const _ChatBubble({
+    required this.message,
+    required this.isUser,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm + 2,
+        ),
+        decoration: BoxDecoration(
+          color: isUser 
+              ? const Color(0xFF4A4A4A)  // Medium grey bubble for user
+              : Colors.black,             // Black bubble for AI
+          border: isUser 
+              ? null 
+              : Border.all(color: Colors.blue, width: 1),  // Blue border for AI
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(isUser ? 16 : 4),
+            bottomRight: Radius.circular(isUser ? 4 : 16),
+          ),
+        ),
+        child: Text(
+          message,
+          style: const TextStyle(
+            fontFamily: AppTextStyles.fontFamily,
+            fontSize: 16,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Represents an item in the image generation conversation
+class _ImageConversationItem {
+  final bool isUser; // true = user prompt, false = AI image response
+  final String? text; // User's prompt text
+  final String? imageUrl; // Generated image URL (for AI responses)
+  final File? referenceImage; // Reference image attached to user prompt
+
+  const _ImageConversationItem({
+    required this.isUser,
+    this.text,
+    this.imageUrl,
+    this.referenceImage,
+  });
+
+  /// Create a user prompt item
+  factory _ImageConversationItem.userPrompt(String text, {File? referenceImage}) {
+    return _ImageConversationItem(
+      isUser: true,
+      text: text,
+      referenceImage: referenceImage,
+    );
+  }
+
+  /// Create an AI image response item
+  factory _ImageConversationItem.aiImage(String imageUrl) {
+    return _ImageConversationItem(
+      isUser: false,
+      imageUrl: imageUrl,
+    );
+  }
+}
+

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Millie Icon Generator</title>
+</head>
+<body>
+    <h1>Millie App Icon Generator</h1>
+    <p>Click the button to generate and download the icon:</p>
+    <button onclick="generateIcon()">Generate & Download Icon</button>
+    <canvas id="iconCanvas" width="1024" height="1024" style="border: 1px solid #ccc; margin-top: 20px; display: block;"></canvas>
+    
+    <script>
+        function generateIcon() {
+            const canvas = document.getElementById('iconCanvas');
+            const ctx = canvas.getContext('2d');
+            const size = 1024;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, size, size);
+            
+            // Background: #101316
+            ctx.fillStyle = '#101316';
+            ctx.fillRect(0, 0, size, size);
+            
+            // Rounded background corners
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, size * 0.15);
+            ctx.fillStyle = '#101316';
+            ctx.fill();
+            
+            const eyeSize = size * 0.35;  // 35% of icon size
+            const eyeGap = size * 0.1;     // 10% gap
+            const eyeBorderRadius = eyeSize * 0.2;  // 20% border radius
+            const centerX = size / 2;
+            const eyeY = size * 0.35;  // Eyes positioned at 35% from top
+            
+            // Left eye (rounded square)
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.roundRect(
+                centerX - eyeSize - eyeGap / 2,
+                eyeY - eyeSize / 2,
+                eyeSize,
+                eyeSize,
+                eyeBorderRadius
+            );
+            ctx.fill();
+            
+            // Right eye (rounded square)
+            ctx.beginPath();
+            ctx.roundRect(
+                centerX + eyeGap / 2,
+                eyeY - eyeSize / 2,
+                eyeSize,
+                eyeSize,
+                eyeBorderRadius
+            );
+            ctx.fill();
+            
+            // Mouth (rounded rectangle)
+            const mouthWidth = size * 0.4;   // 40% width
+            const mouthHeight = size * 0.08; // 8% height
+            const mouthY = size * 0.58;      // Below eyes
+            const mouthRadius = mouthHeight / 2;
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.roundRect(
+                centerX - mouthWidth / 2,
+                mouthY,
+                mouthWidth,
+                mouthHeight,
+                mouthRadius
+            );
+            ctx.fill();
+            
+            // Download as PNG
+            canvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'icon.png';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                alert('Icon generated! Save it to assets/icon/icon.png');
+            });
+        }
+        
+        // Helper function for rounded rectangles (if not supported natively)
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+                this.beginPath();
+                this.moveTo(x + radius, y);
+                this.lineTo(x + width - radius, y);
+                this.quadraticCurveTo(x + width, y, x + width, y + radius);
+                this.lineTo(x + width, y + height - radius);
+                this.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                this.lineTo(x + radius, y + height);
+                this.quadraticCurveTo(x, y + height, x, y + height - radius);
+                this.lineTo(x, y + radius);
+                this.quadraticCurveTo(x, y, x + radius, y);
+                this.closePath();
+            };
+        }
+        
+        // Auto-generate on load for preview
+        window.onload = function() {
+            generateIcon();
+        };
+    </script>
+</body>
+</html>

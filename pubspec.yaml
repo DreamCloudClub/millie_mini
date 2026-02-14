@@ -1,0 +1,76 @@
+name: millie_mini
+description: "Millie Mini - AI Desktop Robot Face + Voice Agent"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  
+  # State Management
+  provider: ^6.1.2
+  
+  # Supabase
+  supabase_flutter: ^2.8.0
+  
+  # Local Storage
+  shared_preferences: ^2.3.3
+  flutter_secure_storage: ^9.2.2
+  
+  # Audio & Speech
+  record: ^6.0.0
+  audioplayers: ^6.1.0
+  permission_handler: ^11.3.1
+  
+  # HTTP & API
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
+  
+  # Utilities
+  uuid: ^4.5.1
+  intl: ^0.19.0
+  url_launcher: ^6.3.1
+  wakelock_plus: ^1.2.8
+  path_provider: ^2.1.4
+  flutter_local_notifications: ^17.0.0
+  timezone: ^0.9.4
+  
+  # Image Picker
+  image_picker: ^1.0.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.7
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/icon/icon.png
+    - assets/icon/logo.png
+
+# App Icon Configuration
+flutter_launcher_icons:
+  android: true
+  ios: false  # Set to true if you want iOS icons too
+  image_path: "assets/icon/icon.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  adaptive_icon: false  # Disable adaptive icons to avoid circular cropping
+
+# Native Splash Screen Configuration
+flutter_native_splash:
+  image: "assets/icon/icon.png"
+  color: "#30C1FF"  # dreamCloudBlue to match splash page
+  android: true
+  image_dark: "assets/icon/icon.png"
+  color_dark: "#30C1FF"  # dreamCloudBlue to match splash page
+  ios: false
