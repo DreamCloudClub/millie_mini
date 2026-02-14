@@ -1,12 +1,13 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/providers.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
 import '../face/control_bar.dart';
+import 'lesson_phase.dart';
 
 /// Game display page for riddles, jokes, and interactive games
+/// Uses the FSM-based GameController for lesson mode
 class GamePageContent extends StatelessWidget {
   final VoidCallback onNavigateToFace;
   final VoidCallback onPause;
@@ -30,8 +31,7 @@ class GamePageContent extends StatelessWidget {
       body: SafeArea(
         child: Consumer<VoiceProvider>(
           builder: (context, voiceProvider, _) {
-            final gameState = voiceProvider.gameState;
-            debugPrint('GamePageContent rebuild: isActive=${gameState.isActive}, question=${gameState.question}');
+            final lessonState = voiceProvider.lessonState;
 
             return Column(
               children: [
@@ -42,7 +42,7 @@ class GamePageContent extends StatelessWidget {
                     children: [
                       // Green refresh button (left) - resets game to menu
                       GestureDetector(
-                        onTap: () => voiceProvider.endGame(),
+                        onTap: () => voiceProvider.endLessonMode(),
                         child: Container(
                           width: 44,
                           height: 44,
@@ -108,24 +108,44 @@ class GamePageContent extends StatelessWidget {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(15),
-                        child: gameState.isActive
-                            ? _buildGameDisplay(context, gameState)
+                        child: lessonState.isActive
+                            ? _buildLessonDisplay(context, lessonState)
                             : _buildMenuState(context, voiceProvider),
                       ),
                     ),
                   ),
                 ),
 
-                // Status text
+                // Status text - uses FSM phase status
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                  child: Text(
-                    voiceProvider.state.statusText,
-                    style: TextStyle(
-                      fontFamily: AppTextStyles.fontFamily,
-                      fontSize: 14,
-                      color: Colors.white.withValues(alpha: 0.5),
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Mic indicator - shows when LISTEN phase AND mic is actually active
+                      // Uses controller's isMicActive which combines phase check with real mic state
+                      if (voiceProvider.gameController.isMicActive) ...[
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        lessonState.isActive
+                            ? lessonState.statusText
+                            : voiceProvider.state.statusText,
+                        style: TextStyle(
+                          fontFamily: AppTextStyles.fontFamily,
+                          fontSize: 14,
+                          color: Colors.white.withOpacity(0.5),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
 
@@ -151,12 +171,12 @@ class GamePageContent extends StatelessWidget {
         children: [
           const Spacer(),
 
-          // Game options
+          // Game options - now using startLessonCategory
           _GameOptionButton(
             icon: Icons.psychology,
             title: 'Riddles',
             subtitle: 'Test your thinking',
-            onTap: () => voiceProvider.startGameCategory(GameType.riddle),
+            onTap: () => voiceProvider.startLessonCategory('riddle'),
           ),
 
           const SizedBox(height: AppSpacing.md),
@@ -165,7 +185,7 @@ class GamePageContent extends StatelessWidget {
             icon: Icons.sentiment_very_satisfied,
             title: 'Jokes',
             subtitle: 'Laugh along',
-            onTap: () => voiceProvider.startGameCategory(GameType.joke),
+            onTap: () => voiceProvider.startLessonCategory('joke'),
           ),
 
           const SizedBox(height: AppSpacing.md),
@@ -174,7 +194,7 @@ class GamePageContent extends StatelessWidget {
             icon: Icons.quiz_outlined,
             title: 'Trivia',
             subtitle: 'Test your knowledge',
-            onTap: () => voiceProvider.startGameCategory(GameType.trivia),
+            onTap: () => voiceProvider.startLessonCategory('trivia'),
           ),
 
           const SizedBox(height: AppSpacing.md),
@@ -183,7 +203,7 @@ class GamePageContent extends StatelessWidget {
             icon: Icons.shuffle,
             title: 'Random',
             subtitle: 'Mix it up',
-            onTap: () => voiceProvider.startGameCategory(GameType.random),
+            onTap: () => voiceProvider.startLessonCategory('random'),
           ),
 
           const Spacer(),
@@ -192,7 +212,11 @@ class GamePageContent extends StatelessWidget {
     );
   }
 
-  Widget _buildGameDisplay(BuildContext context, GameState gameState) {
+  Widget _buildLessonDisplay(BuildContext context, LessonState lessonState) {
+    final showAnswer = lessonState.isCorrect != null;
+    final questionText = lessonState.displayQuestion;
+    final answerText = lessonState.displayAnswer;
+
     return Padding(
       padding: const EdgeInsets.symmetric(
         vertical: AppSpacing.lg,
@@ -200,44 +224,79 @@ class GamePageContent extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // Progress indicator
+          if (lessonState.questionCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: Text(
+                lessonState.progressText,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: 14,
+                  color: Colors.white.withOpacity(0.6),
+                ),
+              ),
+            ),
+
           const Spacer(flex: 1),
 
           // Main question in large text
           Text(
-            gameState.question.isEmpty ? 'Waiting for content...' : gameState.question,
+            questionText.isEmpty ? 'Starting...' : questionText,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: AppTextStyles.fontFamily,
               fontSize: 28,
               fontWeight: FontWeight.w400,
-              color: gameState.question.isEmpty ? Colors.white.withOpacity(0.5) : Colors.white,
+              color: questionText.isEmpty
+                  ? Colors.white.withOpacity(0.5)
+                  : Colors.white,
               height: 1.3,
             ),
           ),
 
           const Spacer(flex: 1),
 
-          // Answer section (when revealed)
-          if (gameState.answer != null && gameState.isAnswerRevealed)
+          // Answer section (when revealed in FEEDBACK phase)
+          if (showAnswer && answerText.isNotEmpty)
             Container(
               margin: const EdgeInsets.only(top: AppSpacing.lg),
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
                 border: Border.all(
-                  color: Colors.green.withValues(alpha: 0.5),
+                  color: lessonState.isCorrect == true
+                      ? Colors.green.withOpacity(0.5)
+                      : Colors.orange.withOpacity(0.5),
                   width: 1,
                 ),
                 borderRadius: BorderRadius.circular(AppBorderRadius.medium),
               ),
-              child: Text(
-                gameState.answer!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontFamily: AppTextStyles.fontFamily,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.green,
-                ),
+              child: Column(
+                children: [
+                  // Correct/incorrect indicator
+                  Icon(
+                    lessonState.isCorrect == true
+                        ? Icons.check_circle
+                        : Icons.info_outline,
+                    color: lessonState.isCorrect == true
+                        ? Colors.green
+                        : Colors.orange,
+                    size: 32,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    answerText,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w500,
+                      color: lessonState.isCorrect == true
+                          ? Colors.green
+                          : Colors.orange,
+                    ),
+                  ),
+                ],
               ),
             ),
 
@@ -324,62 +383,4 @@ class _GameOptionButton extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Game types
-enum GameType {
-  riddle,
-  joke,
-  trivia,
-  random,
-}
-
-/// Current game state
-class GameState {
-  final bool isActive;
-  final GameType type;
-  final String? questionId; // DB question ID
-  final String question;
-  final String? answer;
-  final bool isAnswerRevealed;
-  final int questionCount; // How many questions asked in this session
-
-  const GameState({
-    this.isActive = false,
-    this.type = GameType.riddle,
-    this.questionId,
-    this.question = '',
-    this.answer,
-    this.isAnswerRevealed = false,
-    this.questionCount = 0,
-  });
-
-  GameState copyWith({
-    bool? isActive,
-    GameType? type,
-    String? questionId,
-    String? question,
-    String? answer,
-    bool? isAnswerRevealed,
-    int? questionCount,
-  }) {
-    return GameState(
-      isActive: isActive ?? this.isActive,
-      type: type ?? this.type,
-      questionId: questionId ?? this.questionId,
-      question: question ?? this.question,
-      answer: answer ?? this.answer,
-      isAnswerRevealed: isAnswerRevealed ?? this.isAnswerRevealed,
-      questionCount: questionCount ?? this.questionCount,
-    );
-  }
-
-  GameState revealAnswer(String answerText) {
-    return copyWith(
-      answer: answerText,
-      isAnswerRevealed: true,
-    );
-  }
-
-  static const GameState inactive = GameState();
 }

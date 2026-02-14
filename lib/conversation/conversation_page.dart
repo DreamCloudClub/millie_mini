@@ -148,30 +148,8 @@ class _ConversationPageState extends State<ConversationPage> {
       _jumpToPage(gamePageIndex);
     };
 
-    // Set up callback for starting game categories (button taps)
-    voiceProvider.noteToolsHandler.onStartGameCategory = (category) {
-      debugPrint('Starting game category: $category');
-      switch (category) {
-        case 'riddle':
-          voiceProvider.startGameCategory(GameType.riddle);
-          break;
-        case 'joke':
-          voiceProvider.startGameCategory(GameType.joke);
-          break;
-        case 'trivia':
-          voiceProvider.startGameCategory(GameType.trivia);
-          break;
-        case 'random':
-          voiceProvider.startGameCategory(GameType.random);
-          break;
-      }
-    };
-
-    // Set up callback for when AI fetches a game question (to update display)
-    voiceProvider.noteToolsHandler.onGameQuestionFetched = (question, answer) {
-      debugPrint('Game question fetched: $question');
-      voiceProvider.setGameQuestion(question, answer);
-    };
+    // Note: Game/lesson mode callbacks (onStartLessonMode, onExitLessonMode) are
+    // wired internally in VoiceProvider._setupGameController()
 
     // Note: Pause is handled via flag in noteToolsHandler.checkAndClearPauseFlag()
     // The pipeline checks this flag after playing the response and pauses then
@@ -359,7 +337,7 @@ class _ConversationPageState extends State<ConversationPage> {
     );
 
     final voiceProvider = context.read<VoiceProvider>();
-    voiceProvider.endGame(); // Reset game state
+    voiceProvider.endLessonMode(); // Reset game state
     await voiceProvider.endSession();
     await Future.delayed(const Duration(milliseconds: 300));
 

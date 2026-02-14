@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
-import '../utils/constants.dart';
 import '../utils/text_helpers.dart';
 import '../services/voice_pipeline_service.dart';
 import '../services/storage_service.dart';
@@ -9,29 +8,45 @@ import '../services/reminder_intent_handler.dart';
 import '../services/reminder_scheduler_service.dart';
 import '../services/note_tools_handler.dart';
 import '../services/weather_service.dart';
-import '../services/game_questions_service.dart';
-import '../game/game_page_content.dart';
+import '../game/game_controller.dart';
+import '../game/lesson_phase.dart';
 import 'reminder_provider.dart';
 
 class VoiceProvider extends ChangeNotifier {
   final _uuid = const Uuid();
   late final VoicePipelineService _pipeline;
+  late final GameController _gameController;
   ReminderIntentHandler? _reminderIntentHandler;
   ReminderProvider? _reminderProvider;
   final NoteToolsHandler _noteToolsHandler = NoteToolsHandler();
-  
+
   VoiceState _state = VoiceState.sleep;
   Conversation? _conversation;
   bool _isWakeWordActive = false;
   String? _error;
   String? _lastTranscription;
   String? _lastResponse;
-  GameState _gameState = GameState.inactive;
-  
+
   VoiceProvider(StorageService storageService) {
     _pipeline = VoicePipelineService(storageService);
     _pipeline.noteToolsHandler = _noteToolsHandler;
+    _gameController = GameController();
     _setupPipelineCallbacks();
+    _setupGameController();
+    _setupLessonModeCallbacks();
+  }
+
+  /// Wire lesson mode callbacks from NoteToolsHandler
+  void _setupLessonModeCallbacks() {
+    _noteToolsHandler.onStartLessonMode = (category) async {
+      debugPrint('VoiceProvider: onStartLessonMode callback - category: $category');
+      await startLessonCategory(category);
+    };
+
+    _noteToolsHandler.onExitLessonMode = () async {
+      debugPrint('VoiceProvider: onExitLessonMode callback');
+      await exitLessonMode();
+    };
   }
   
   /// Set ReminderProvider reference (call this after ReminderProvider is initialized)
@@ -77,203 +92,148 @@ class VoiceProvider extends ChangeNotifier {
   bool get isPaused => _state == VoiceState.paused;
   bool get isRecording => _pipeline.isRecording;
 
-  // Game state
-  GameState get gameState => _gameState;
-  GameType? _currentGameCategory;
+  // ============================================================
+  // GAME CONTROLLER (FSM-based lesson mode)
+  // ============================================================
+
+  /// Get the game controller for UI access
+  GameController get gameController => _gameController;
+
+  /// Get the current lesson state for UI
+  LessonState get lessonState => _gameController.state;
+
+  /// Whether lesson mode is active
+  bool get isLessonActive => _gameController.isActive;
 
   /// Callback for navigating to game page
   VoidCallback? onNavigateToGame;
 
-  /// Start a game category - fetches first question from DB
-  Future<void> startGameCategory(GameType type) async {
-    debugPrint('VoiceProvider.startGameCategory: type=$type');
+  /// Setup the game controller with pipeline integration
+  void _setupGameController() {
+    // Wire TTS callback
+    _gameController.onPlayTTS = (text) async {
+      final voice = _pendingVoice ?? 'alloy';
+      await _pipeline.playTTSForLesson(text, voice);
+    };
+
+    // Wire mic start callback
+    _gameController.onStartMic = () async {
+      final sessionId = _gameController.sessionId;
+      debugPrint('VP: onStartMic callback ENTER (session=$sessionId)');
+
+      // Stop any existing chat listening first
+      debugPrint('VP: calling pauseContinuousMode');
+      await _pipeline.pauseContinuousMode();
+      debugPrint('VP: pauseContinuousMode returned');
+
+      transitionTo(VoiceState.listening);
+      _gameController.onMicStarted();
+
+      debugPrint('VP: calling startLessonListening (session=$sessionId)');
+      await _pipeline.startLessonListening(sessionId: sessionId);
+      debugPrint('VP: startLessonListening returned');
+    };
+
+    // Wire mic stop callback (for manual stops, e.g., skip/exit)
+    _gameController.onStopMic = () async {
+      debugPrint('VP: onStopMic callback ENTER (session=${_gameController.sessionId})');
+
+      // Capture session ID before async operation
+      final sessionId = _gameController.sessionId;
+
+      debugPrint('VP: calling stopLessonListening (manual)');
+      final transcription = await _pipeline.stopLessonListening();
+      debugPrint('VP: stopLessonListening returned: "$transcription"');
+
+      _gameController.onMicStopped();
+
+      if (transcription != null && transcription.isNotEmpty) {
+        // Pass session ID to validate callback is still relevant
+        debugPrint('VP: calling onASRResult with transcription');
+        _gameController.onASRResult(transcription, sessionId: sessionId);
+      } else {
+        debugPrint('VP: no transcription, not calling onASRResult');
+      }
+    };
+
+    // Wire auto-transcription callback (called when lesson mic auto-stops)
+    _pipeline.onLessonTranscriptionComplete = (transcription, sessionId) {
+      debugPrint('VP: onLessonTranscriptionComplete (session=$sessionId, text="$transcription")');
+      _gameController.onMicStopped();
+      _gameController.onASRResult(transcription, sessionId: sessionId);
+    };
+
+    // Wire navigation callbacks
+    _gameController.onLessonStarted = () {
+      onNavigateToGame?.call();
+      notifyListeners();
+    };
+
+    _gameController.onLessonEnded = () {
+      // Resume to paused state after lesson ends
+      transitionTo(VoiceState.paused);
+      notifyListeners();
+    };
+
+    // Forward controller notifications
+    _gameController.addListener(() {
+      notifyListeners();
+    });
+  }
+
+  /// Start a lesson category - delegates to FSM controller
+  Future<void> startLessonCategory(String category) async {
+    debugPrint('VoiceProvider.startLessonCategory: category=$category');
 
     // Stop any ongoing listening/speaking first
     await _pipeline.stopContinuousMode();
 
-    _currentGameCategory = type;
-    _gameState = GameState(
-      isActive: true,
-      type: type,
-      questionCount: 0,
-    );
-    notifyListeners();
-
-    // Small delay for UI to update
-    await Future.delayed(const Duration(milliseconds: 200));
-
-    // Load the first question
-    await loadNextQuestion();
+    // Delegate to FSM controller
+    await _gameController.startMode(category);
   }
 
-  /// Load the next question from the database
-  Future<void> loadNextQuestion() async {
-    if (_currentGameCategory == null) return;
-
-    final categoryStr = _currentGameCategory == GameType.random
-        ? 'random'
-        : _currentGameCategory.toString().split('.').last;
-
-    debugPrint('VoiceProvider.loadNextQuestion: category=$categoryStr');
-
-    final question = await GameQuestionsService.getNextQuestion(categoryStr);
-
-    if (question == null) {
-      debugPrint('VoiceProvider.loadNextQuestion: No questions found');
-      final voice = _pendingVoice ?? 'alloy';
-      await _pipeline.playTextToSpeech('No more questions available. Let me know if you want to try another category.', voice);
-      return;
-    }
-
-    // Mark as used
-    await GameQuestionsService.markAsUsed(question.id);
-
-    // Update game state with new question (shows on screen first)
-    _gameState = _gameState.copyWith(
-      questionId: question.id,
-      question: question.question,
-      answer: question.answer,
-      isAnswerRevealed: false,
-      questionCount: _gameState.questionCount + 1,
-    );
-    notifyListeners();
-
-    // Wait for UI to render the question before speaking
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // Speak the question
-    final voice = _pendingVoice ?? 'alloy';
-    transitionTo(VoiceState.speaking);
-    await _pipeline.playTextToSpeech(question.question, voice);
-
-    // Wait a moment after speaking before listening
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    // Start listening for the answer
-    transitionTo(VoiceState.listening);
-
-    // Process personality prompt
-    final processedPersonalityPrompt = _pendingPersonalityPrompt != null && _pendingAgentName != null
-        ? replaceAgentNamePlaceholder(_pendingPersonalityPrompt!, _pendingAgentName)
-        : _pendingPersonalityPrompt;
-
-    await _pipeline.startListening(
-      continuousMode: false,  // Not continuous - game handles the loop
-      agentId: _pendingAgentId,
-      personalityPrompt: processedPersonalityPrompt,
-      aiServiceId: _pendingAiServiceId,
-      voice: voice,
-      username: _pendingUsername,
-      bio: _pendingBio,
-      userId: _pendingUserId,
-      userEmail: _pendingUserEmail,
-      subscriptionStatus: _pendingSubscriptionStatus,
-      getConversationHistory: () => getConversationHistory(),
-    );
+  /// Exit lesson mode - delegates to FSM controller
+  Future<void> exitLessonMode() async {
+    await _gameController.exitMode();
   }
 
-  /// Reveal the answer for current question
-  void revealGameAnswer() {
-    debugPrint('VoiceProvider.revealGameAnswer: isActive=${_gameState.isActive}');
-    if (_gameState.isActive && _gameState.answer != null) {
-      _gameState = _gameState.copyWith(isAnswerRevealed: true);
-      debugPrint('VoiceProvider.revealGameAnswer: revealed');
-      notifyListeners();
+  /// End lesson mode immediately (for menu button)
+  void endLessonMode() {
+    if (_gameController.isActive) {
+      _gameController.exitMode();
     }
   }
 
-  /// Move to next question (auto-called after answer confirmed)
-  Future<void> nextGameQuestion() async {
-    if (!_gameState.isActive) return;
 
-    // Check if we should ask about changing category (every 5 questions)
-    if (_gameState.questionCount > 0 && _gameState.questionCount % 5 == 0) {
-      await sendTextMessage(
-        text: 'You have answered ${_gameState.questionCount} questions! Would you like to continue with ${_currentGameCategory?.toString().split('.').last ?? 'this category'} or switch to something else?',
-        playAudio: true,
-        resumeListening: true,
-      );
-      return;
-    }
-
-    // Load next question
-    await loadNextQuestion();
-  }
-
-  /// Handle user's answer to a game question
-  Future<void> _handleGameAnswer(String userAnswer) async {
-    final correctAnswer = _gameState.answer?.toLowerCase().trim() ?? '';
-    final userAnswerLower = userAnswer.toLowerCase().trim();
-    final voice = _pendingVoice ?? 'alloy';
-
-    debugPrint('VoiceProvider._handleGameAnswer: user="$userAnswerLower", correct="$correctAnswer"');
-
-    // Check if answer is correct (flexible matching)
-    final isCorrect = userAnswerLower.contains(correctAnswer) ||
-                      correctAnswer.contains(userAnswerLower) ||
-                      _fuzzyMatch(userAnswerLower, correctAnswer);
-
-    _gameState = _gameState.copyWith(isAnswerRevealed: true);
-    notifyListeners();
-
-    transitionTo(VoiceState.speaking);
-    if (isCorrect) {
-      await _pipeline.playTextToSpeech("That's right!", voice);
-    } else {
-      await _pipeline.playTextToSpeech('The answer is: ${_gameState.answer}', voice);
-    }
-
-    await Future.delayed(const Duration(seconds: 1));
-    await loadNextQuestion();
-  }
-
-  /// Simple fuzzy match for answer checking
-  bool _fuzzyMatch(String userAnswer, String correctAnswer) {
-    final userWords = userAnswer.split(' ').where((w) => w.length > 2).toSet();
-    final correctWords = correctAnswer.split(' ').where((w) => w.length > 2).toSet();
-    return userWords.intersection(correctWords).isNotEmpty;
-  }
-
-  /// End the current game
-  void endGame() {
-    _gameState = GameState.inactive;
-    _currentGameCategory = null;
-    notifyListeners();
-  }
-
-  /// Set the current game question (called when AI fetches a question)
-  void setGameQuestion(String question, String answer) {
-    _gameState = GameState(
-      isActive: true,
-      question: question,
-      answer: answer,
-      isAnswerRevealed: false,
-      questionCount: _gameState.questionCount + 1,
-    );
-    notifyListeners();
-  }
-
-  /// Reveal the current game answer (called when AI reveals it)
-  void revealCurrentAnswer() {
-    if (_gameState.isActive) {
-      _gameState = _gameState.copyWith(isAnswerRevealed: true);
-      notifyListeners();
-    }
-  }
-  
   /// Setup callbacks from pipeline service
   void _setupPipelineCallbacks() {
     _pipeline.onStateChange = (state) {
       transitionTo(state);
     };
-    
+
+    // Wire TTS completion callback for lesson mode FSM
+    _pipeline.onTTSPlaybackComplete = () {
+      if (_gameController.isActive) {
+        // Pass current session ID to validate callback
+        final sessionId = _gameController.sessionId;
+        debugPrint('VoiceProvider: TTS complete, notifying game controller (session $sessionId)');
+        _gameController.onTTSFinished(sessionId: sessionId);
+      }
+    };
+
     _pipeline.onTranscription = (transcription) {
       _lastTranscription = transcription;
 
-      // Check if we're in game mode waiting for an answer
-      if (_gameState.isActive && _gameState.answer != null && !_gameState.isAnswerRevealed) {
-        debugPrint('VoiceProvider: Game mode - checking answer');
-        _handleGameAnswer(transcription);
+      // EXCLUSIVITY: If lesson mode is active, it owns the mic
+      // Only forward transcriptions during LISTEN phase
+      if (_gameController.isActive) {
+        if (_gameController.phase == LessonPhase.listen) {
+          debugPrint('VoiceProvider: Lesson mode - forwarding transcription to controller');
+          final sessionId = _gameController.sessionId;
+          _gameController.onASRResult(transcription, sessionId: sessionId);
+        } else {
+          debugPrint('VoiceProvider: Lesson mode active but not in LISTEN phase - ignoring transcription');
+        }
         return;
       }
 
@@ -290,18 +250,18 @@ class VoiceProvider extends ChangeNotifier {
 
       notifyListeners();
     };
-    
+
     _pipeline.onResponse = (response) {
       _lastResponse = response;
       addAssistantMessage(response);
       notifyListeners();
     };
-    
+
     _pipeline.onError = (error) {
       _error = error;
       setError(error);
     };
-    
+
     // NOTE: Old wizard-based reminder flow is disabled.
     // All schedule/reminder operations now go through AI function calling (create_alert, etc.)
     _pipeline.onProcessReminderIntent = (userInput, remindersList) async {

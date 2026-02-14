@@ -81,7 +81,14 @@ class VoicePipelineService {
   Function(String)? onResponse;
   Function(String)? onError;
   Function()? onWakeWordDetected;
-  
+
+  /// Called when TTS playback completes (for game/lesson mode FSM)
+  Function()? onTTSPlaybackComplete;
+
+  /// Called when transcription is ready for lesson mode (bypasses normal flow)
+  /// Returns true if lesson mode handled it, false to continue normal processing
+  bool Function(String)? onTranscriptionForLesson;
+
   // Reminder intent handler callback
   Future<String?> Function(String userInput, List<Map<String, dynamic>> reminders)? onProcessReminderIntent;
   
@@ -1142,12 +1149,13 @@ class VoicePipelineService {
   Future<void> playTextToSpeech(String text, String voice) async {
     try {
       debugPrint('Playing TTS for text: ${text.substring(0, text.length > 50 ? 50 : text.length)}...');
+      onStateChange?.call(VoiceState.speaking);
       final audioPath = await _textToSpeech(text, voice);
-      
+
       if (audioPath != null) {
         try { await _player.stop(); } catch (_) {}
         _isPlaying = true;
-        
+
         final completer = Completer<void>();
         StreamSubscription<void>? subscription;
         subscription = _player.onPlayerComplete.listen((_) {
@@ -1156,16 +1164,255 @@ class VoicePipelineService {
             subscription?.cancel();
           }
         });
-        
+
         await _player.play(DeviceFileSource(audioPath));
         await completer.future.timeout(const Duration(seconds: 60), onTimeout: () {
           subscription?.cancel();
         });
         _isPlaying = false;
         debugPrint('TTS playback complete');
+
+        // Fire TTS completion callback for lesson mode FSM
+        onTTSPlaybackComplete?.call();
       }
     } catch (e) {
       debugPrint('Error playing TTS: $e');
+    }
+  }
+
+  /// Play TTS for lesson mode (no auto-resume, fires completion callback)
+  Future<void> playTTSForLesson(String text, String voice) async {
+    try {
+      debugPrint('Playing lesson TTS: ${text.substring(0, text.length > 50 ? 50 : text.length)}...');
+      onStateChange?.call(VoiceState.speaking);
+      final audioPath = await _textToSpeech(text, voice);
+
+      if (audioPath != null) {
+        try { await _player.stop(); } catch (_) {}
+        _isPlaying = true;
+
+        final completer = Completer<void>();
+        StreamSubscription<void>? subscription;
+        subscription = _player.onPlayerComplete.listen((_) {
+          if (!completer.isCompleted) {
+            completer.complete();
+            subscription?.cancel();
+          }
+        });
+
+        await _player.play(DeviceFileSource(audioPath));
+        await completer.future.timeout(const Duration(seconds: 60), onTimeout: () {
+          subscription?.cancel();
+        });
+        _isPlaying = false;
+        debugPrint('Lesson TTS playback complete');
+
+        // Wait a moment before callback
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // Fire TTS completion callback for lesson mode FSM
+        onTTSPlaybackComplete?.call();
+      } else {
+        // No audio path - still fire callback so FSM can proceed
+        onTTSPlaybackComplete?.call();
+      }
+    } catch (e) {
+      debugPrint('Error playing lesson TTS: $e');
+      // Still fire callback on error so FSM doesn't get stuck
+      onTTSPlaybackComplete?.call();
+    }
+  }
+
+  // Lesson mode listening state
+  bool _isLessonListening = false;
+  int? _lessonSessionId;
+  Timer? _lessonMaxTimer;
+  Timer? _lessonSilenceTimer;
+  StreamSubscription? _lessonAmplitudeSubscription;
+  DateTime? _lessonLastSpeechTime;
+  bool _lessonHasDetectedSpeech = false;
+  static const Duration _lessonMaxDuration = Duration(seconds: 6);
+  static const Duration _lessonSilenceThreshold = Duration(milliseconds: 1500);
+
+  /// Callback for when lesson transcription is complete
+  /// Parameters: transcription text, session ID
+  void Function(String transcription, int sessionId)? onLessonTranscriptionComplete;
+
+  /// Start listening for lesson mode (self-contained with auto-stop)
+  Future<void> startLessonListening({int? sessionId}) async {
+    debugPrint('PIPELINE: startLessonListening() called (sessionId=$sessionId)');
+
+    if (_isRecording || _isLessonListening) {
+      debugPrint('PIPELINE: startLessonListening EARLY RETURN - already recording');
+      return;
+    }
+
+    final hasPermission = await checkMicrophonePermission();
+    if (!hasPermission) {
+      debugPrint('PIPELINE: startLessonListening EARLY RETURN - no permission');
+      onError?.call('Microphone permission denied');
+      return;
+    }
+
+    try {
+      if (!await _recorder.hasPermission()) {
+        debugPrint('PIPELINE: startLessonListening EARLY RETURN - recorder no permission');
+        onError?.call('Microphone permission denied');
+        return;
+      }
+
+      _isLessonListening = true;
+      _lessonSessionId = sessionId;
+      _lessonHasDetectedSpeech = false;
+      _lessonLastSpeechTime = null;
+
+      onStateChange?.call(VoiceState.listening);
+
+      final recordingPath = await _getRecordingPath();
+
+      await _recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: recordingPath,
+      );
+      _isRecording = true;
+      _currentRecordingPath = recordingPath;
+      _recordingStartTime = DateTime.now();
+
+      debugPrint('PIPELINE: lesson recording STARTED path=$recordingPath');
+
+      // Start lesson-specific auto-stop timer (max 6 seconds)
+      _lessonMaxTimer = Timer(_lessonMaxDuration, () {
+        debugPrint('PIPELINE: lesson recording MAX TIMER fired');
+        _autoStopLessonListening('max_duration');
+      });
+
+      // Start amplitude monitoring for silence detection
+      _startLessonAmplitudeMonitoring(recordingPath);
+
+    } catch (e) {
+      debugPrint('PIPELINE: startLessonListening FAILED: $e');
+      _isLessonListening = false;
+      onError?.call('Failed to start recording');
+    }
+  }
+
+  /// Amplitude monitoring specifically for lesson mode
+  void _startLessonAmplitudeMonitoring(String recordingPath) {
+    _lessonAmplitudeSubscription?.cancel();
+    _lessonAmplitudeSubscription = _recorder
+        .onAmplitudeChanged(const Duration(milliseconds: 100))
+        .listen((amp) {
+      if (!_isLessonListening || !_isRecording) return;
+
+      final db = amp.current;
+
+      // Speech detection (same threshold as chat mode)
+      if (db > _speechAmplitudeThreshold) {
+        _lessonHasDetectedSpeech = true;
+        _lessonLastSpeechTime = DateTime.now();
+        _lessonSilenceTimer?.cancel();
+      } else if (_lessonHasDetectedSpeech && _lessonLastSpeechTime != null) {
+        // We've detected speech before, now it's quiet - start silence timer
+        final silenceDuration = DateTime.now().difference(_lessonLastSpeechTime!);
+        if (silenceDuration >= _lessonSilenceThreshold) {
+          debugPrint('PIPELINE: lesson recording SILENCE detected after speech');
+          _autoStopLessonListening('silence');
+        }
+      }
+    });
+  }
+
+  /// Auto-stop lesson listening and trigger transcription
+  Future<void> _autoStopLessonListening(String reason) async {
+    if (!_isLessonListening) {
+      debugPrint('PIPELINE: _autoStopLessonListening called but not lesson listening');
+      return;
+    }
+
+    debugPrint('PIPELINE: lesson recording AUTO-STOP (reason=$reason)');
+
+    // Cancel timers and subscriptions
+    _lessonMaxTimer?.cancel();
+    _lessonSilenceTimer?.cancel();
+    _lessonAmplitudeSubscription?.cancel();
+
+    final sessionId = _lessonSessionId ?? 0;
+    _isLessonListening = false;
+
+    if (!_isRecording) {
+      debugPrint('PIPELINE: lesson mic STOPPED (not recording)');
+      return;
+    }
+
+    try {
+      _isRecording = false;
+      final path = await _recorder.stop();
+      _currentRecordingPath = null;
+
+      debugPrint('PIPELINE: lesson mic STOPPED path=$path');
+
+      if (path == null) {
+        debugPrint('PIPELINE: no recording path, skipping transcription');
+        return;
+      }
+
+      // Transcribe
+      debugPrint('PIPELINE: lesson transcription START');
+      onStateChange?.call(VoiceState.processing);
+      final transcription = await _speechToText(path);
+      debugPrint('PIPELINE: lesson transcription DONE text="${transcription ?? ""}"');
+
+      // Call the lesson transcription callback
+      if (transcription != null && transcription.isNotEmpty) {
+        debugPrint('PIPELINE: calling onLessonTranscriptionComplete(sessionId=$sessionId)');
+        onLessonTranscriptionComplete?.call(transcription, sessionId);
+      } else {
+        debugPrint('PIPELINE: empty transcription, not calling callback');
+      }
+
+    } catch (e) {
+      debugPrint('PIPELINE: lesson auto-stop FAILED: $e');
+      _isRecording = false;
+    }
+  }
+
+  /// Stop lesson listening manually (cancels auto-stop)
+  Future<String?> stopLessonListening() async {
+    debugPrint('PIPELINE: stopLessonListening() called (manual)');
+
+    // Cancel auto-stop mechanisms
+    _lessonMaxTimer?.cancel();
+    _lessonSilenceTimer?.cancel();
+    _lessonAmplitudeSubscription?.cancel();
+    _isLessonListening = false;
+
+    if (!_isRecording) {
+      debugPrint('PIPELINE: stopLessonListening EARLY RETURN - not recording');
+      return null;
+    }
+
+    try {
+      _isRecording = false;
+      final path = await _recorder.stop();
+      _currentRecordingPath = null;
+
+      debugPrint('PIPELINE: lesson mic STOPPED (manual), path=$path');
+
+      if (path == null) return null;
+
+      // Transcribe
+      onStateChange?.call(VoiceState.processing);
+      final transcription = await _speechToText(path);
+      debugPrint('PIPELINE: lesson transcription result: "$transcription"');
+      return transcription;
+    } catch (e) {
+      debugPrint('PIPELINE: stopLessonListening FAILED: $e');
+      _isRecording = false;
+      return null;
     }
   }
   
@@ -1626,10 +1873,13 @@ Format note content nicely with line breaks, bullet points, and clear sections.
       debugPrint('Failed to play audio chunks: $e');
     } finally {
       _isPlaying = false;
-      
+
       // Wait a moment after audio finishes before transitioning
       await Future.delayed(const Duration(milliseconds: 500));
-      
+
+      // Fire TTS completion callback for lesson mode FSM
+      onTTSPlaybackComplete?.call();
+
       // Check if AI requested a pause (e.g., user said "pause")
       if (noteToolsHandler != null && noteToolsHandler!.checkAndClearPauseFlag()) {
         debugPrint('AI requested pause after response - pausing now');
@@ -1725,10 +1975,13 @@ Format note content nicely with line breaks, bullet points, and clear sections.
       onError?.call('Failed to play audio: $e');
     } finally {
       _isPlaying = false;
-      
+
       // Wait a moment after audio finishes before starting listening (prevents interruptions)
       await Future.delayed(const Duration(milliseconds: 500));
-      
+
+      // Fire TTS completion callback for lesson mode FSM
+      onTTSPlaybackComplete?.call();
+
       // Resume listening if not paused
       if (!_isPaused && autoResumeListening && _isContinuousMode) {
         await startListening(

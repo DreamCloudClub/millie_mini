@@ -4,7 +4,6 @@ import '../providers/reminder_provider.dart';
 import 'notes_service.dart';
 import 'openai_service.dart';
 import 'weather_service.dart';
-import 'game_questions_service.dart';
 
 /// Result of executing an AI tool
 class AIToolResult {
@@ -121,11 +120,11 @@ class NoteToolsHandler {
   /// Callback when schedule list should be refreshed (create, update, delete)
   VoidCallback? onScheduleListChanged;
 
-  /// Callback to start a game category
-  Function(String category)? onStartGameCategory;
+  /// Callback to start lesson mode (FSM-controlled)
+  Future<void> Function(String category)? onStartLessonMode;
 
-  /// Callback when a game question is fetched (to update display)
-  Function(String question, String answer)? onGameQuestionFetched;
+  /// Callback to exit lesson mode
+  Future<void> Function()? onExitLessonMode;
 
   /// Set the active note (for when UI updates it externally)
   /// Does NOT trigger onActiveNoteChanged to avoid infinite loops
@@ -344,8 +343,8 @@ class NoteToolsHandler {
     {
       'type': 'function',
       'function': {
-        'name': 'get_game_question',
-        'description': 'Get a question from the database to ask the user. Use when user wants to play riddles, jokes, or trivia. Call this to get a question, then ASK the question and WAIT for their answer. After they answer, tell them if correct and call this again for the next question.',
+        'name': 'start_lesson_mode',
+        'description': 'Start an interactive lesson/game mode. Use when user wants to play riddles, jokes, or trivia. This activates the FSM-controlled lesson mode which handles all question asking, answer checking, and feedback automatically. After calling this, the system takes over - you do NOT need to ask questions or check answers yourself.',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -356,6 +355,18 @@ class NoteToolsHandler {
             },
           },
           'required': ['category'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'exit_lesson_mode',
+        'description': 'Exit the current lesson/game mode. Use when user wants to stop playing, quit the game, or go back to normal conversation.',
+        'parameters': {
+          'type': 'object',
+          'properties': {},
+          'required': [],
         },
       },
     },
@@ -579,8 +590,10 @@ class NoteToolsHandler {
         return _showSchedule();
       case 'show_games':
         return _showGames();
-      case 'get_game_question':
-        return await _getGameQuestion(toolCall.arguments);
+      case 'start_lesson_mode':
+        return await _startLessonMode(toolCall.arguments);
+      case 'exit_lesson_mode':
+        return await _exitLessonMode();
       case 'close_note':
         return _closeNote();
       case 'delete_note':
@@ -985,54 +998,47 @@ class NoteToolsHandler {
     );
   }
 
-  /// Get a game question from the database for AI to ask
-  Future<NoteToolResult> _getGameQuestion(Map<String, dynamic> args) async {
+  /// Start lesson mode (FSM-controlled)
+  /// This hands control to the GameController which handles all questioning/answering
+  Future<NoteToolResult> _startLessonMode(Map<String, dynamic> args) async {
     final category = args['category'] as String? ?? 'random';
 
-    try {
-      // Navigate to game page to show the question
-      onNavigate?.call(AINavigationTarget.game);
+    debugPrint('NoteToolsHandler: Starting lesson mode with category: $category');
 
-      // Fetch question from database
-      final question = await GameQuestionsService.getNextQuestion(category);
+    // Navigate to game page
+    onNavigate?.call(AINavigationTarget.game);
 
-      if (question == null) {
-        return NoteToolResult(
-          success: false,
-          message: 'No more questions available in this category. Try another category!',
-        );
-      }
+    // Trigger the FSM-controlled lesson mode
+    if (onStartLessonMode != null) {
+      await onStartLessonMode!(category);
 
-      // Mark as used so we don't repeat
-      await GameQuestionsService.markAsUsed(question.id);
-
-      // Update game display with the question
-      onGameQuestionFetched?.call(question.question, question.answer);
-
-      // Return question AND answer to AI - AI will ask and evaluate
       return NoteToolResult(
         success: true,
-        message: '''
-QUESTION TO ASK: ${question.question}
-
-CORRECT ANSWER: ${question.answer}
-
-INSTRUCTIONS:
-1. Ask the user this question naturally (read it aloud)
-2. Wait for their answer
-3. If they get it right (close enough match), congratulate them!
-4. If wrong, tell them the correct answer
-5. Then call get_game_question again for the next question
-6. Keep going until they want to stop
-
-DO NOT reveal the answer before they try!
-''',
+        message: 'Lesson mode started. The system will handle asking questions and checking answers automatically. You do not need to do anything else - just let the user know you\'re starting.',
       );
-    } catch (e) {
-      debugPrint('Error getting game question: $e');
+    } else {
       return NoteToolResult(
         success: false,
-        message: 'Error getting question: $e',
+        message: 'Lesson mode not available.',
+      );
+    }
+  }
+
+  /// Exit lesson mode
+  Future<NoteToolResult> _exitLessonMode() async {
+    debugPrint('NoteToolsHandler: Exiting lesson mode');
+
+    if (onExitLessonMode != null) {
+      await onExitLessonMode!();
+
+      return NoteToolResult(
+        success: true,
+        message: 'Lesson mode ended.',
+      );
+    } else {
+      return NoteToolResult(
+        success: true,
+        message: 'Not in lesson mode.',
       );
     }
   }
@@ -1679,16 +1685,14 @@ NAVIGATION:
 - "go back" or "close the note" → use go_back to return to conversation
 - "switch to text" or "I want to type" → use show_chat
 - "make an image" or "generate a picture" → use show_image_generator
-- "let's play a game", "games", "riddles", "jokes", "trivia" → use show_games
+- "let's play a game", "games", "riddles", "jokes", "trivia" → use start_lesson_mode
 
-GAMES - IMPORTANT:
-- When user wants riddles/jokes/trivia, call get_game_question with the category
-- The tool returns a QUESTION and ANSWER from the database
-- ASK the question to the user and WAIT for their answer
-- Evaluate their answer - if close enough, congratulate them; if wrong, reveal the answer
-- Then call get_game_question again for the next question
-- Keep the game going until they want to stop
-- DO NOT make up your own questions - always use get_game_question to fetch from database
+GAMES/LESSONS - SIMPLE:
+- When user wants riddles/jokes/trivia, call start_lesson_mode with the category
+- The system takes over and handles all questions, answers, and feedback automatically
+- You do NOT need to ask questions or check answers - just acknowledge starting the game
+- If user wants to stop, call exit_lesson_mode
+- Example: User says "let's play riddles" → call start_lesson_mode(category="riddle") → respond "Let's go!"
 
 PAUSE:
 - "pause", "stop", "hold on", "wait", "be quiet", "stop listening" → use pause_conversation
