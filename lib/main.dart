@@ -11,6 +11,7 @@ import 'auth/signup_page.dart';
 import 'dashboard/dashboard_page.dart';
 import 'dashboard/user_profile_edit_page.dart';
 import 'dashboard/account_settings_edit_page.dart';
+import 'dashboard/game_settings_edit_page.dart';
 import 'agents/agent_profiles_page.dart';
 import 'agents/edit_agent_page.dart';
 import 'personalities/personality_builder_page.dart';
@@ -81,6 +82,9 @@ class MillieMiniApp extends StatelessWidget {
             storageService: storageService,
           ),
         ),
+        ChangeNotifierProvider(
+          create: (_) => GameSettingsProvider(storageService),
+        ),
       ],
       child: MaterialApp(
         title: 'Millie Mini',
@@ -134,6 +138,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       context.read<PersonalityProvider>().init(),
       context.read<AIServiceProvider>().init(),
       context.read<ReminderProvider>().init(),
+      context.read<GameSettingsProvider>().init(),
     ]);
     
     // Wire up ReminderIntentHandler in VoiceProvider
@@ -267,6 +272,7 @@ enum MainRoute {
   face,
   userProfile,
   accountSettings,
+  gameSettings,
   agentProfiles,
   editAgent,
   personalityBuilder,
@@ -312,6 +318,7 @@ class _MainNavigatorState extends State<MainNavigator> {
           onEditUserProfile: () => _push(MainRoute.userProfile),
           onEditAIService: () => _push(MainRoute.aiServices),
           onEditAccountSettings: () => _push(MainRoute.accountSettings),
+          onEditGameSettings: () => _push(MainRoute.gameSettings),
         );
 
       case MainRoute.face:
@@ -340,6 +347,17 @@ class _MainNavigatorState extends State<MainNavigator> {
             onBack: _pop,
             onLogout: () {}, // Auth state change will handle navigation
             onDeleteAccount: () {}, // Auth state change will handle navigation
+          ),
+        );
+
+      case MainRoute.gameSettings:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: GameSettingsEditPage(
+            onSaved: _pop,
           ),
         );
 

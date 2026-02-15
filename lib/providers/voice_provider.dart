@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
+import '../models/game_settings.dart';
 import '../utils/text_helpers.dart';
 import '../services/voice_pipeline_service.dart';
 import '../services/storage_service.dart';
@@ -181,16 +182,67 @@ class VoiceProvider extends ChangeNotifier {
     });
   }
 
-  /// Start a lesson category - delegates to FSM controller
+  /// Configure game settings (time limit and difficulty)
+  void setGameSettings(GameSettings settings) {
+    debugPrint('VoiceProvider.setGameSettings: $settings');
+    _gameController.setTimeLimit(settings.timeLimit.seconds);
+    _gameController.setDifficulty(settings.difficulty.dbValue);
+  }
+
+  /// Select a lesson category (doesn't start the game yet)
+  void selectLessonCategory(String category) {
+    debugPrint('VoiceProvider.selectLessonCategory: category=$category');
+    _gameController.selectCategory(category);
+    notifyListeners();
+  }
+
+  /// Start the game (after category is selected)
+  Future<void> startGame() async {
+    debugPrint('VoiceProvider.startGame');
+
+    // Stop any ongoing listening/speaking first
+    await _pipeline.stopContinuousMode();
+
+    // Delegate to FSM controller
+    await _gameController.startMode();
+  }
+
+  /// Start a lesson category directly (for voice commands)
   Future<void> startLessonCategory(String category) async {
     debugPrint('VoiceProvider.startLessonCategory: category=$category');
 
     // Stop any ongoing listening/speaking first
     await _pipeline.stopContinuousMode();
 
-    // Delegate to FSM controller
+    // Delegate to FSM controller - pass category directly
     await _gameController.startMode(category);
   }
+
+  /// Pause the game
+  Future<void> pauseGame() async {
+    await _gameController.pauseGame();
+    notifyListeners();
+  }
+
+  /// Resume the game
+  Future<void> resumeGame() async {
+    await _gameController.resumeGame();
+    notifyListeners();
+  }
+
+  /// Skip the current question
+  Future<void> skipQuestion() async {
+    await _gameController.skipQuestion();
+  }
+
+  /// Whether the game is paused
+  bool get isGamePaused => _gameController.isPaused;
+
+  /// Whether a category is selected (ready to start)
+  bool get isGameSelected => _gameController.isSelected;
+
+  /// Whether the game is actively running
+  bool get isGameRunning => _gameController.isGameRunning;
 
   /// Exit lesson mode - delegates to FSM controller
   Future<void> exitLessonMode() async {

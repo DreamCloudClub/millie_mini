@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'lesson_phase.dart';
 import 'lesson_item.dart';
 import '../services/game_questions_service.dart';
+import '../services/spelling_words_service.dart';
 
 /// Callback type for TTS playback
 typedef TTSCallback = Future<void> Function(String text);
@@ -30,6 +32,20 @@ class GameController extends ChangeNotifier {
   /// Flag to track if mic is actually recording
   bool _isMicActive = false;
 
+  /// Flag to track if game is paused
+  bool _isPaused = false;
+
+  /// Store the phase we were in when paused (to resume correctly)
+  LessonPhase? _pausedFromPhase;
+
+  /// Timer fields for countdown functionality
+  int? _timeLimitSeconds;
+  int? _remainingSeconds;
+  Timer? _countdownTimer;
+
+  /// Difficulty filter for questions
+  String? _difficultyFilter;
+
   /// Callbacks for TTS and mic control (wired from VoiceProvider/Pipeline)
   TTSCallback? onPlayTTS;
   MicStartCallback? onStartMic;
@@ -53,8 +69,107 @@ class GameController extends ChangeNotifier {
   /// Whether mic is actually active (for UI indicator)
   bool get isMicActive => _isMicActive && _state.phase == LessonPhase.listen;
 
+  /// Whether game is paused
+  bool get isPaused => _isPaused;
+
+  /// Whether a category is selected and ready to start
+  bool get isSelected => _state.phase == LessonPhase.selected;
+
+  /// Whether the game is actively running (past selected phase)
+  bool get isGameRunning => _state.isGameRunning;
+
   /// Current session ID (for callback validation)
   int get sessionId => _sessionId;
+
+  /// Remaining seconds on the countdown timer (null when no timer active)
+  int? get remainingSeconds => _remainingSeconds;
+
+  /// Whether the timer is active
+  bool get isTimerActive => _countdownTimer != null && _countdownTimer!.isActive;
+
+  /// Current time limit setting in seconds
+  int? get timeLimitSeconds => _timeLimitSeconds;
+
+  /// Current difficulty filter
+  String? get difficultyFilter => _difficultyFilter;
+
+  // ============================================================
+  // SETTINGS CONFIGURATION
+  // ============================================================
+
+  /// Set the time limit for listening phase (null = no limit)
+  void setTimeLimit(int? seconds) {
+    _timeLimitSeconds = seconds;
+    debugPrint('GameController: Time limit set to $seconds seconds');
+  }
+
+  /// Set the difficulty filter for questions
+  void setDifficulty(String? difficulty) {
+    _difficultyFilter = difficulty;
+    debugPrint('GameController: Difficulty filter set to $difficulty');
+  }
+
+  /// Cancel any active countdown timer
+  void _cancelTimer() {
+    if (_countdownTimer != null) {
+      _countdownTimer!.cancel();
+      _countdownTimer = null;
+      _remainingSeconds = null;
+      debugPrint('GameController: Timer cancelled');
+    }
+  }
+
+  /// Start the countdown timer
+  void _startTimer() {
+    if (_timeLimitSeconds == null || _timeLimitSeconds! <= 0) {
+      return;
+    }
+
+    _remainingSeconds = _timeLimitSeconds;
+    debugPrint('GameController: Starting timer with $_remainingSeconds seconds');
+    notifyListeners();
+
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_remainingSeconds == null || _remainingSeconds! <= 0) {
+        _handleTimerExpired();
+        return;
+      }
+
+      _remainingSeconds = _remainingSeconds! - 1;
+      notifyListeners();
+
+      if (_remainingSeconds! <= 0) {
+        _handleTimerExpired();
+      }
+    });
+  }
+
+  /// Handle timer expiration - stop mic and treat as empty answer
+  Future<void> _handleTimerExpired() async {
+    debugPrint('GameController: Timer expired - treating as timeout');
+    _cancelTimer();
+
+    // Only handle if we're still in listen phase
+    if (_state.phase != LessonPhase.listen || _isExiting || _isPaused) {
+      return;
+    }
+
+    // Mark mic as inactive
+    _isMicActive = false;
+
+    // Stop mic
+    await onStopMic?.call();
+
+    // Treat as empty answer (skipped)
+    _state = _state.copyWith(
+      phase: LessonPhase.eval,
+      userAnswer: '',
+    );
+    notifyListeners();
+
+    // Evaluate as incorrect (empty answer)
+    _evaluateAnswer('');
+  }
 
   // ============================================================
   // HARDCODED ITEMS FOR INITIAL TESTING (Phase 1)
@@ -102,29 +217,63 @@ class GameController extends ChangeNotifier {
   // ROUTER COMMANDS (called from VoiceProvider/NoteToolsHandler)
   // ============================================================
 
-  /// Start lesson mode with a category
-  /// Called when LLM detects "let's play riddles" intent
-  Future<void> startMode(String category) async {
-    if (_state.isActive) {
-      debugPrint('GameController: Already in lesson mode, ignoring startMode');
-      return;
-    }
-
-    debugPrint('GameController: Starting lesson mode with category: $category');
-
-    // Increment session ID to invalidate any stale callbacks
-    _sessionId++;
-    final currentSession = _sessionId;
+  /// Select a category without starting the game
+  /// User must press Start to begin
+  void selectCategory(String category) {
+    debugPrint('GameController: Category selected: $category');
 
     // Reset tracking
     _askedItemIds.clear();
     _isExiting = false;
     _isMicActive = false;
+    _isPaused = false;
+    _pausedFromPhase = null;
+
+    // Transition to SELECTED phase
+    _state = LessonState(
+      phase: LessonPhase.selected,
+      category: category,
+      questionCount: 0,
+      correctCount: 0,
+    );
+    notifyListeners();
+  }
+
+  /// Start the game (from selected state or directly with category)
+  /// Called when user presses Start button
+  Future<void> startMode([String? category]) async {
+    // If already running, ignore
+    if (_state.isGameRunning) {
+      debugPrint('GameController: Game already running, ignoring startMode');
+      return;
+    }
+
+    // Use provided category or the already selected one
+    final gameCategory = category ?? _state.category;
+    if (gameCategory.isEmpty) {
+      debugPrint('GameController: No category selected, ignoring startMode');
+      return;
+    }
+
+    debugPrint('GameController: Starting game with category: $gameCategory');
+
+    // Increment session ID to invalidate any stale callbacks
+    _sessionId++;
+    final currentSession = _sessionId;
+
+    // Reset tracking if starting fresh (not from selected)
+    if (!_state.isSelected) {
+      _askedItemIds.clear();
+    }
+    _isExiting = false;
+    _isMicActive = false;
+    _isPaused = false;
+    _pausedFromPhase = null;
 
     // Transition to INTRO phase
     _state = LessonState(
       phase: LessonPhase.intro,
-      category: category,
+      category: gameCategory,
       questionCount: 0,
       correctCount: 0,
     );
@@ -134,7 +283,7 @@ class GameController extends ChangeNotifier {
     onLessonStarted?.call();
 
     // Play intro message
-    final introText = _getIntroText(category);
+    final introText = _getIntroText(gameCategory);
     await _playTTSAndWait(introText, currentSession);
 
     // After intro TTS completes, onTTSFinished will be called
@@ -158,6 +307,9 @@ class GameController extends ChangeNotifier {
 
     // Set exiting flag to ignore subsequent callbacks
     _isExiting = true;
+
+    // Cancel any active timer
+    _cancelTimer();
 
     // Increment session ID to invalidate any pending callbacks
     _sessionId++;
@@ -192,6 +344,7 @@ class GameController extends ChangeNotifier {
     _isExiting = true;
     _sessionId++;
     _isMicActive = false;
+    _cancelTimer();
 
     // Stop mic synchronously (fire and forget)
     onStopMic?.call();
@@ -244,6 +397,7 @@ class GameController extends ChangeNotifier {
         break;
 
       case LessonPhase.idle:
+      case LessonPhase.selected:
       case LessonPhase.listen:
       case LessonPhase.eval:
         // No action needed for these phases
@@ -266,12 +420,21 @@ class GameController extends ChangeNotifier {
       return;
     }
 
+    // Ignore if we're paused (mic was stopped for pause, not for answer)
+    if (_isPaused) {
+      debugPrint('GameController: Ignoring ASR callback - game is paused');
+      return;
+    }
+
     if (_state.phase != LessonPhase.listen) {
       debugPrint('GameController: Ignoring ASR result - not in LISTEN phase (current: ${_state.phase})');
       return;
     }
 
     debugPrint('GameController: onASRResult in LISTEN phase: "$transcription"');
+
+    // Cancel timer since we got an answer
+    _cancelTimer();
 
     // Mark mic as inactive
     _isMicActive = false;
@@ -314,6 +477,9 @@ class GameController extends ChangeNotifier {
 
     _state = _state.copyWith(phase: LessonPhase.listen);
     notifyListeners();
+
+    // Start countdown timer if time limit is set
+    _startTimer();
 
     debugPrint('FSM: calling onStartMic (session=$_sessionId, callback=${onStartMic != null})');
 
@@ -380,8 +546,8 @@ class GameController extends ChangeNotifier {
     );
     notifyListeners();
 
-    // Play the question
-    await _playTTSAndWait(item.prompt, currentSession);
+    // Play the question (uses ttsPrompt for spelling mode)
+    await _playTTSAndWait(item.ttsPrompt, currentSession);
 
     // onTTSFinished will handle the transition to LISTEN
   }
@@ -426,11 +592,17 @@ class GameController extends ChangeNotifier {
   // ============================================================
 
   /// Get next item for the category
-  /// Uses hardcoded items for now, will switch to database later
+  /// Routes to appropriate service based on category
   Future<LessonItem?> _getNextItem(String category) async {
-    // First try to get from database
+    // Spelling uses its own table/service
+    if (category == 'spelling') {
+      return _getNextSpellingWord();
+    }
+
+    // All other categories use game_questions table
     final dbQuestion = await GameQuestionsService.getNextQuestion(
       category == 'random' ? 'random' : category,
+      difficulty: _difficultyFilter,
     );
 
     if (dbQuestion != null && !_askedItemIds.contains(dbQuestion.id)) {
@@ -442,6 +614,7 @@ class GameController extends ChangeNotifier {
         type: dbQuestion.category,
         prompt: dbQuestion.question,
         answer: dbQuestion.answer,
+        gradingType: GradingType.flexible,
       );
     }
 
@@ -455,6 +628,28 @@ class GameController extends ChangeNotifier {
     }
 
     // No more items available
+    return null;
+  }
+
+  /// Get next spelling word from spelling_words table
+  Future<LessonItem?> _getNextSpellingWord() async {
+    final word = await SpellingWordsService.getNextWord(
+      difficulty: _difficultyFilter,
+    );
+
+    if (word != null && !_askedItemIds.contains(word.id)) {
+      // Mark as used
+      await SpellingWordsService.markAsUsed(word.id);
+
+      return LessonItem(
+        id: word.id,
+        type: 'spelling',
+        prompt: word.word,
+        answer: word.word,
+        gradingType: GradingType.spelling,
+      );
+    }
+
     return null;
   }
 
@@ -472,6 +667,8 @@ class GameController extends ChangeNotifier {
         return "Let's have some laughs! I'll tell you a joke.";
       case 'trivia':
         return "Let's test your knowledge! I'll ask you some trivia questions.";
+      case 'spelling':
+        return "Let's practice spelling! I'll show you a word and you spell it out loud, letter by letter.";
       default:
         return "Let's play! I'll ask you some questions.";
     }
@@ -539,11 +736,66 @@ class GameController extends ChangeNotifier {
   // MANUAL CONTROLS (for UI buttons)
   // ============================================================
 
+  /// Pause the game - stops mic and timer
+  Future<void> pauseGame() async {
+    if (!_state.isGameRunning || _isPaused || _isExiting) {
+      debugPrint('GameController: Cannot pause - not running or already paused');
+      return;
+    }
+
+    // Only allow pause during LISTEN phase (recording/countdown)
+    if (_state.phase != LessonPhase.listen) {
+      debugPrint('GameController: Cannot pause - not in LISTEN phase (current: ${_state.phase})');
+      return;
+    }
+
+    debugPrint('GameController: Pausing game from LISTEN phase');
+    _isPaused = true;
+    _pausedFromPhase = _state.phase;
+
+    // Stop mic
+    if (_isMicActive) {
+      _isMicActive = false;
+      await onStopMic?.call();
+    }
+
+    // Cancel the timer while paused
+    _cancelTimer();
+
+    notifyListeners();
+  }
+
+  /// Resume the game - restarts mic and timer
+  Future<void> resumeGame() async {
+    if (!_state.isGameRunning || !_isPaused || _isExiting) {
+      debugPrint('GameController: Cannot resume - not paused or not running');
+      return;
+    }
+
+    debugPrint('GameController: Resuming game to phase $_pausedFromPhase');
+    _isPaused = false;
+
+    // Restart mic if we were in listen phase
+    if (_pausedFromPhase == LessonPhase.listen) {
+      _isMicActive = true;
+      // Restart timer if we had a time limit
+      _startTimer();
+      await onStartMic?.call();
+    }
+
+    _pausedFromPhase = null;
+    notifyListeners();
+  }
+
   /// Skip current question and move to next
   Future<void> skipQuestion() async {
     if (!_state.isActive || _state.phase == LessonPhase.idle || _isExiting) {
       return;
     }
+
+    // Unpause if paused
+    _isPaused = false;
+    _pausedFromPhase = null;
 
     final currentSession = _sessionId;
 
@@ -590,6 +842,7 @@ class GameController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _cancelTimer();
     _askedItemIds.clear();
     _isExiting = true;
     super.dispose();

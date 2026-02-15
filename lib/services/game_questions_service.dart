@@ -3,37 +3,75 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/game_question.dart';
 
 /// Service for managing game questions (riddles, jokes, trivia)
+/// Uses per-user tracking via user_question_history table
 class GameQuestionsService {
   static final _supabase = Supabase.instance.client;
   static const String _tableName = 'game_questions';
+  static const String _historyTable = 'user_question_history';
 
-  /// Get the next question for a category (oldest last_used_at first)
+  /// Get the next question for a category (prioritizes unseen, then oldest seen)
   /// If category is 'random', picks from any category
-  static Future<GameQuestion?> getNextQuestion(String category) async {
+  /// If difficulty is provided, filters by difficulty level
+  /// Tracks usage per authenticated user
+  static Future<GameQuestion?> getNextQuestion(
+    String category, {
+    String? difficulty,
+  }) async {
     try {
-      final query = _supabase.from(_tableName).select();
-
-      List<dynamic> response;
-      if (category == 'random') {
-        // Get oldest used from any category
-        response = await query
-            .order('last_used_at', ascending: true, nullsFirst: true)
-            .limit(1);
-      } else {
-        // Get oldest used from specific category
-        response = await query
-            .eq('category', category)
-            .order('last_used_at', ascending: true, nullsFirst: true)
-            .limit(1);
-      }
-
-      if (response.isEmpty) {
-        debugPrint('GameQuestionsService: No questions found for $category');
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint('GameQuestionsService: No user logged in');
         return null;
       }
 
-      final question = GameQuestion.fromJson(response.first as Map<String, dynamic>);
-      debugPrint('GameQuestionsService: Got question ${question.id} (${question.category})');
+      // Get user's question history
+      final historyResponse = await _supabase
+          .from(_historyTable)
+          .select('question_id, last_used_at')
+          .eq('user_id', userId);
+
+      // Build a map of question_id -> last_used_at
+      final historyMap = <String, DateTime>{};
+      for (final row in historyResponse) {
+        historyMap[row['question_id'] as String] =
+            DateTime.parse(row['last_used_at'] as String);
+      }
+
+      // Build query for questions
+      var query = _supabase.from(_tableName).select();
+
+      // Apply category filter if not random
+      if (category != 'random') {
+        query = query.eq('category', category);
+      }
+
+      // Apply difficulty filter if provided
+      if (difficulty != null && difficulty.isNotEmpty) {
+        query = query.eq('difficulty', difficulty);
+      }
+
+      final questionsResponse = await query;
+
+      if (questionsResponse.isEmpty) {
+        debugPrint('GameQuestionsService: No questions found for $category (difficulty: $difficulty)');
+        return null;
+      }
+
+      // Sort: questions not in history first (never seen), then by oldest seen
+      questionsResponse.sort((a, b) {
+        final aUsed = historyMap[a['id'] as String];
+        final bUsed = historyMap[b['id'] as String];
+
+        if (aUsed == null && bUsed == null) return 0;
+        if (aUsed == null) return -1; // a comes first (never used)
+        if (bUsed == null) return 1; // b comes first (never used)
+        return aUsed.compareTo(bUsed); // older usage comes first
+      });
+
+      final question =
+          GameQuestion.fromJson(questionsResponse.first as Map<String, dynamic>);
+      debugPrint(
+          'GameQuestionsService: Got question ${question.id} (${question.category}, difficulty: ${question.difficulty}) for user $userId');
       return question;
     } catch (e) {
       debugPrint('GameQuestionsService: Error getting question: $e');
@@ -41,14 +79,22 @@ class GameQuestionsService {
     }
   }
 
-  /// Mark a question as used (updates last_used_at)
+  /// Mark a question as used for the current user (upserts to user_question_history)
   static Future<void> markAsUsed(String questionId) async {
     try {
-      await _supabase
-          .from(_tableName)
-          .update({'last_used_at': DateTime.now().toIso8601String()})
-          .eq('id', questionId);
-      debugPrint('GameQuestionsService: Marked $questionId as used');
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint('GameQuestionsService: No user logged in, cannot mark as used');
+        return;
+      }
+
+      await _supabase.from(_historyTable).upsert({
+        'user_id': userId,
+        'question_id': questionId,
+        'last_used_at': DateTime.now().toIso8601String(),
+      });
+      debugPrint(
+          'GameQuestionsService: Marked $questionId as used for user $userId');
     } catch (e) {
       debugPrint('GameQuestionsService: Error marking as used: $e');
     }
@@ -85,6 +131,7 @@ class GameQuestionsService {
     required String category,
     required String question,
     required String answer,
+    String difficulty = 'medium',
   }) async {
     try {
       final response = await _supabase
@@ -93,6 +140,7 @@ class GameQuestionsService {
             'category': category,
             'question': question,
             'answer': answer,
+            'difficulty': difficulty,
           })
           .select()
           .single();

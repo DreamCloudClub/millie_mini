@@ -497,9 +497,9 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
   }
 
   Widget _buildInitialView() {
-    final title = _mode == ChatMode.text 
-        ? 'Millie Mini AI' 
-        : 'Millie Mini Artist';
+    final title = _mode == ChatMode.text
+        ? 'AI Chat Bot'
+        : 'AI Artist';
     final subtitle = _mode == ChatMode.text
         ? 'How can I help you?'
         : 'What can I create for you?';

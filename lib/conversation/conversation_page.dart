@@ -380,6 +380,16 @@ class _ConversationPageState extends State<ConversationPage> {
             onPlay: () => context.read<VoiceProvider>().resume(),
             onRefresh: _handleRefreshFromChat,
             onExit: _handleExit,
+            onSkip: () => context.read<VoiceProvider>().gameController.skipQuestion(),
+            onStart: () {
+              // Apply game settings before starting
+              final voiceProvider = context.read<VoiceProvider>();
+              final gameSettingsProvider = context.read<GameSettingsProvider>();
+              voiceProvider.setGameSettings(gameSettingsProvider.settings);
+              voiceProvider.startGame();
+            },
+            onGamePause: () => context.read<VoiceProvider>().pauseGame(),
+            onGameResume: () => context.read<VoiceProvider>().resumeGame(),
           ),
 
           // Page 1: Chat/Image Page

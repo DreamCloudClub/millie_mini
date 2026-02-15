@@ -4,6 +4,7 @@ class GameQuestion {
   final String category; // 'riddle', 'joke', 'trivia'
   final String question;
   final String answer;
+  final String difficulty; // 'easy', 'medium', 'hard'
   final DateTime? lastUsedAt;
   final DateTime createdAt;
 
@@ -12,6 +13,7 @@ class GameQuestion {
     required this.category,
     required this.question,
     required this.answer,
+    this.difficulty = 'medium',
     this.lastUsedAt,
     required this.createdAt,
   });
@@ -22,6 +24,7 @@ class GameQuestion {
       category: json['category'] as String,
       question: json['question'] as String,
       answer: json['answer'] as String,
+      difficulty: json['difficulty'] as String? ?? 'medium',
       lastUsedAt: json['last_used_at'] != null
           ? DateTime.parse(json['last_used_at'] as String)
           : null,
@@ -35,6 +38,7 @@ class GameQuestion {
       'category': category,
       'question': question,
       'answer': answer,
+      'difficulty': difficulty,
       'last_used_at': lastUsedAt?.toIso8601String(),
       'created_at': createdAt.toIso8601String(),
     };
@@ -45,6 +49,7 @@ class GameQuestion {
       'category': category,
       'question': question,
       'answer': answer,
+      'difficulty': difficulty,
     };
   }
 
@@ -53,6 +58,7 @@ class GameQuestion {
     String? category,
     String? question,
     String? answer,
+    String? difficulty,
     DateTime? lastUsedAt,
     DateTime? createdAt,
   }) {
@@ -61,6 +67,7 @@ class GameQuestion {
       category: category ?? this.category,
       question: question ?? this.question,
       answer: answer ?? this.answer,
+      difficulty: difficulty ?? this.difficulty,
       lastUsedAt: lastUsedAt ?? this.lastUsedAt,
       createdAt: createdAt ?? this.createdAt,
     );

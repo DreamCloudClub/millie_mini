@@ -13,6 +13,7 @@ class DashboardPage extends StatelessWidget {
   final VoidCallback onEditUserProfile;
   final VoidCallback onEditAIService;
   final VoidCallback onEditAccountSettings;
+  final VoidCallback onEditGameSettings;
 
   const DashboardPage({
     super.key,
@@ -21,6 +22,7 @@ class DashboardPage extends StatelessWidget {
     required this.onEditUserProfile,
     required this.onEditAIService,
     required this.onEditAccountSettings,
+    required this.onEditGameSettings,
   });
 
   @override
@@ -121,11 +123,15 @@ class DashboardPage extends StatelessWidget {
               _UserProfileCard(onEdit: onEditUserProfile),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 3: AI Service
+              // Card 3: Game Settings
+              _GameSettingsCard(onEdit: onEditGameSettings),
+              const SizedBox(height: AppSpacing.md),
+
+              // Card 4: AI Service
               _AIServiceCard(onEdit: onEditAIService),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 4: Account Settings
+              // Card 5: Account Settings
               _AccountSettingsCard(onEdit: onEditAccountSettings),
               const SizedBox(height: AppSpacing.lg),
             ],
@@ -366,6 +372,41 @@ class _AIServiceCard extends StatelessWidget {
                     ),
                   ),
                 ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _GameSettingsCard extends StatelessWidget {
+  final VoidCallback onEdit;
+
+  const _GameSettingsCard({required this.onEdit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<GameSettingsProvider>(
+      builder: (context, gameSettingsProvider, _) {
+        final settings = gameSettingsProvider.settings;
+
+        return AppCard(
+          title: 'Game Settings',
+          onEdit: onEdit,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _DetailRow(
+                label: 'Time Limit',
+                value: settings.timeLimit.displayName,
+                compactSpacing: true,
+              ),
+              _DetailRow(
+                label: 'Difficulty',
+                value: settings.difficulty.displayName,
+                compactSpacing: true,
+              ),
             ],
           ),
         );

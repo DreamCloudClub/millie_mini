@@ -22,11 +22,11 @@ enum GradingType {
   numeric,
 }
 
-/// A lesson item (riddle, joke, trivia question, etc.)
+/// A lesson item (riddle, joke, trivia question, spelling, etc.)
 class LessonItem {
   final String id;
-  final String type; // 'riddle', 'joke', 'trivia'
-  final String prompt; // The question/riddle text
+  final String type; // 'riddle', 'joke', 'trivia', 'spelling'
+  final String prompt; // The question/riddle text (or word for spelling)
   final String answer; // The correct answer
   final List<String> aliases; // Alternative correct answers
   final GradingType gradingType; // How to evaluate the answer
@@ -41,6 +41,21 @@ class LessonItem {
     this.gradingType = GradingType.flexible,
     this.numericTolerance,
   });
+
+  /// Get the text to speak via TTS (different from display for spelling)
+  String get ttsPrompt {
+    if (gradingType == GradingType.spelling) {
+      return 'How do you spell $prompt?';
+    }
+    return prompt;
+  }
+
+  /// Get the text to display on screen (just the word for spelling)
+  String get displayText {
+    // For spelling, just show the word (displayed large)
+    // For others, show the full question
+    return prompt;
+  }
 
   /// Deterministic answer checking - uses gradingType to determine strategy
   bool checkAnswer(String userAnswer) {
@@ -72,14 +87,25 @@ class LessonItem {
     return false;
   }
 
-  /// Spelling match (case-sensitive)
+  /// Spelling match - handles letter-by-letter input
+  /// Normalizes: extracts only letters, compares lowercase
+  /// Handles "a p p l e", "A P P L E", "apple", etc.
   bool _checkSpelling(String userAnswer) {
-    final trimmed = userAnswer.trim();
-    if (trimmed == answer.trim()) {
+    // Normalize: extract only letters, lowercase
+    final userLetters = userAnswer
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z]'), ''); // Remove spaces, punctuation
+
+    final answerLetters = answer.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+
+    if (userLetters == answerLetters) {
       return true;
     }
+
+    // Check aliases too
     for (final alias in aliases) {
-      if (trimmed == alias.trim()) {
+      final aliasLetters = alias.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+      if (userLetters == aliasLetters) {
         return true;
       }
     }
@@ -204,7 +230,9 @@ class LessonItem {
 
   /// Create from database map
   factory LessonItem.fromMap(Map<String, dynamic> map) {
-    // Parse grading type from string
+    final category = map['type'] as String? ?? map['category'] as String? ?? '';
+
+    // Parse grading type from string, or infer from category
     GradingType gradingType = GradingType.flexible;
     final gradingStr = map['grading_type'] as String?;
     if (gradingStr != null) {
@@ -222,11 +250,14 @@ class LessonItem {
           gradingType = GradingType.numeric;
           break;
       }
+    } else if (category == 'spelling') {
+      // Auto-set spelling grading type for spelling category
+      gradingType = GradingType.spelling;
     }
 
     return LessonItem(
       id: map['id'] as String,
-      type: map['type'] as String? ?? map['category'] as String? ?? 'riddle',
+      type: category.isEmpty ? 'riddle' : category,
       prompt: map['prompt'] as String? ?? map['question'] as String? ?? '',
       answer: map['answer'] as String? ?? '',
       aliases: (map['aliases'] as List<dynamic>?)

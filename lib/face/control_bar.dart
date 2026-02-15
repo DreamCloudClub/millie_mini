@@ -9,6 +9,10 @@ class ControlBar extends StatelessWidget {
   final VoidCallback onPlay;
   final VoidCallback onRefresh;
   final VoidCallback onExit;
+  final VoidCallback? onSkip;
+  final VoidCallback? onStart;
+  final VoidCallback? onGamePause;
+  final VoidCallback? onGameResume;
 
   const ControlBar({
     super.key,
@@ -16,6 +20,10 @@ class ControlBar extends StatelessWidget {
     required this.onPlay,
     required this.onRefresh,
     required this.onExit,
+    this.onSkip,
+    this.onStart,
+    this.onGamePause,
+    this.onGameResume,
   });
 
   @override
@@ -23,7 +31,10 @@ class ControlBar extends StatelessWidget {
     return Consumer<VoiceProvider>(
       builder: (context, voiceProvider, _) {
         final isPaused = voiceProvider.isPaused;
-        
+        final isGameSelected = voiceProvider.isGameSelected;
+        final isGameRunning = voiceProvider.isGameRunning;
+        final isGamePaused = voiceProvider.isGamePaused;
+
         return Container(
           margin: const EdgeInsets.only(
             left: AppSpacing.lg,
@@ -48,28 +59,79 @@ class ControlBar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // Refresh button
-              _ControlButton(
-                icon: Icons.refresh,
-                label: 'Refresh',
-                onTap: onRefresh,
-                buttonColor: Colors.green,
-              ),
-              // Play/Pause button in middle
-              if (!isPaused && voiceProvider.state != VoiceState.sleep)
+              // First button: Skip (on game page) or Refresh (otherwise)
+              if (onSkip != null)
                 _ControlButton(
-                  icon: Icons.pause,
-                  label: 'Pause',
-                  onTap: onPause,
-                  buttonColor: Colors.blue,
+                  icon: Icons.skip_next,
+                  label: 'Skip',
+                  onTap: onSkip!,
+                  buttonColor: Colors.green,
+                )
+              else
+                _ControlButton(
+                  icon: Icons.refresh,
+                  label: 'Refresh',
+                  onTap: onRefresh,
+                  buttonColor: Colors.green,
                 ),
-              if (isPaused || voiceProvider.state == VoiceState.sleep)
+
+              // Middle button: Start/Pause/Play based on state
+              if (isGameSelected && onStart != null)
+                // Category selected, show Start button
                 _ControlButton(
                   icon: Icons.play_arrow,
-                  label: voiceProvider.state == VoiceState.sleep ? 'Wake' : 'Play',
+                  label: 'Start',
+                  onTap: onStart!,
+                  buttonColor: Colors.blue,
+                )
+              else if (isGameRunning)
+                // Game running - show Pause or Resume
+                if (isGamePaused && onGameResume != null)
+                  _ControlButton(
+                    icon: Icons.play_arrow,
+                    label: 'Play',
+                    onTap: onGameResume!,
+                    buttonColor: Colors.blue,
+                  )
+                else if (onGamePause != null)
+                  _ControlButton(
+                    icon: Icons.pause,
+                    label: 'Pause',
+                    onTap: onGamePause!,
+                    buttonColor: Colors.blue,
+                  )
+                else
+                  _ControlButton(
+                    icon: Icons.pause,
+                    label: 'Pause',
+                    onTap: onPause,
+                    buttonColor: Colors.blue,
+                  )
+              else if (onStart != null)
+                // On game page but no category selected - show Play (not Wake)
+                _ControlButton(
+                  icon: Icons.play_arrow,
+                  label: 'Play',
                   onTap: onPlay,
                   buttonColor: Colors.blue,
-                ),
+                )
+              else
+                // Normal conversation mode
+                if (!isPaused && voiceProvider.state != VoiceState.sleep)
+                  _ControlButton(
+                    icon: Icons.pause,
+                    label: 'Pause',
+                    onTap: onPause,
+                    buttonColor: Colors.blue,
+                  )
+                else
+                  _ControlButton(
+                    icon: Icons.play_arrow,
+                    label: voiceProvider.state == VoiceState.sleep ? 'Wake' : 'Play',
+                    onTap: onPlay,
+                    buttonColor: Colors.blue,
+                  ),
+
               // Exit button - primary orange
               _ControlButton(
                 icon: Icons.close,

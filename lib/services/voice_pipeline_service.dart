@@ -1231,7 +1231,8 @@ class VoicePipelineService {
   StreamSubscription? _lessonAmplitudeSubscription;
   DateTime? _lessonLastSpeechTime;
   bool _lessonHasDetectedSpeech = false;
-  static const Duration _lessonMaxDuration = Duration(seconds: 6);
+  // Note: Max duration is controlled by GameController timer (based on settings)
+  // Pipeline only handles silence detection for lesson mode
   static const Duration _lessonSilenceThreshold = Duration(milliseconds: 1500);
 
   /// Callback for when lesson transcription is complete
@@ -1284,13 +1285,8 @@ class VoicePipelineService {
 
       debugPrint('PIPELINE: lesson recording STARTED path=$recordingPath');
 
-      // Start lesson-specific auto-stop timer (max 6 seconds)
-      _lessonMaxTimer = Timer(_lessonMaxDuration, () {
-        debugPrint('PIPELINE: lesson recording MAX TIMER fired');
-        _autoStopLessonListening('max_duration');
-      });
-
-      // Start amplitude monitoring for silence detection
+      // Note: Max duration timer is handled by GameController (uses settings)
+      // Pipeline only monitors for silence detection
       _startLessonAmplitudeMonitoring(recordingPath);
 
     } catch (e) {

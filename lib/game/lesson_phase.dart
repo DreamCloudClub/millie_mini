@@ -5,6 +5,9 @@ enum LessonPhase {
   /// Not in lesson mode
   idle,
 
+  /// Category selected, waiting for user to press Start
+  selected,
+
   /// Playing intro message ("Let's do some riddles!")
   intro,
 
@@ -30,6 +33,8 @@ extension LessonPhaseExtension on LessonPhase {
     switch (this) {
       case LessonPhase.idle:
         return 'Ready';
+      case LessonPhase.selected:
+        return 'Press Start';
       case LessonPhase.intro:
         return 'Starting...';
       case LessonPhase.ask:
@@ -82,6 +87,13 @@ class LessonState {
   /// Whether lesson mode is active (not idle)
   bool get isActive => phase != LessonPhase.idle;
 
+  /// Whether the game is actually running (past the selected phase)
+  bool get isGameRunning =>
+      phase != LessonPhase.idle && phase != LessonPhase.selected;
+
+  /// Whether a category has been selected (ready to start)
+  bool get isSelected => phase == LessonPhase.selected;
+
   /// Status text for UI (from phase)
   String get statusText => phase.statusText;
 
@@ -93,6 +105,12 @@ class LessonState {
 
   /// Current answer text for display (when revealed)
   String get displayAnswer => currentItem?.answer ?? '';
+
+  /// Get the current item's grading type
+  GradingType? get gradingType => currentItem?.gradingType;
+
+  /// Whether current question is spelling mode
+  bool get isSpellingMode => currentItem?.gradingType == GradingType.spelling;
 
   /// Display text showing progress
   String get progressText {

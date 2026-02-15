@@ -7,4 +7,5 @@ export 'conversation.dart';
 export 'reminder.dart';
 export 'note.dart';
 export 'game_question.dart';
+export 'game_settings.dart';
 

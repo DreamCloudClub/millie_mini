@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
+import '../models/game_settings.dart';
 import '../utils/constants.dart';
 
 class StorageService {
@@ -158,6 +159,23 @@ class StorageService {
     await _prefs.remove(key);
   }
   
+  // Game Settings
+  Future<void> saveGameSettings(GameSettings settings) async {
+    await _prefs.setString(StorageKeys.gameSettings, jsonEncode(settings.toJson()));
+  }
+
+  Future<GameSettings?> getGameSettings() async {
+    try {
+      final data = _prefs.getString(StorageKeys.gameSettings);
+      if (data == null) return null;
+      return GameSettings.fromJson(jsonDecode(data));
+    } catch (e) {
+      // If data is corrupted, clear it
+      await _prefs.remove(StorageKeys.gameSettings);
+      return null;
+    }
+  }
+
   // Clear all data
   Future<void> clearAll() async {
     await _prefs.clear();

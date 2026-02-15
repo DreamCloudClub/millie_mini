@@ -121,4 +121,5 @@ class StorageKeys {
   static const String isLoggedIn = 'is_logged_in';
   static const String authToken = 'auth_token';
   static const String porcupineAccessKey = 'porcupine_access_key';
+  static const String gameSettings = 'game_settings';
 }
