@@ -42,10 +42,18 @@ class LessonItem {
     this.numericTolerance,
   });
 
-  /// Get the text to speak via TTS (different from display for spelling)
+  /// Get the text to speak via TTS (different from display for spelling/math)
   String get ttsPrompt {
     if (gradingType == GradingType.spelling) {
       return 'How do you spell $prompt?';
+    }
+    if (type == 'math') {
+      // Convert math symbols to spoken words for TTS
+      return prompt
+          .replaceAll('+', 'plus')
+          .replaceAll('-', 'minus')
+          .replaceAll('×', 'times')
+          .replaceAll('÷', 'divided by');
     }
     return prompt;
   }
@@ -55,6 +63,23 @@ class LessonItem {
     // For spelling, just show the word (displayed large)
     // For others, show the full question
     return prompt;
+  }
+
+  /// Check if this is a multi-digit math problem (for stacked display)
+  /// Returns true if either operand has 2+ digits
+  bool get isMultiDigitMath {
+    if (type != 'math') return false;
+
+    // Match patterns like "88 × 12", "5 + 3", "45 - 8", "24 ÷ 6"
+    final regex = RegExp(r'^(\d+)\s*[+\-×÷]\s*(\d+)$');
+    final match = regex.firstMatch(prompt.trim());
+
+    if (match == null) return false;
+
+    final num1 = match.group(1)!;
+    final num2 = match.group(2)!;
+
+    return num1.length >= 2 || num2.length >= 2;
   }
 
   /// Deterministic answer checking - uses gradingType to determine strategy
@@ -133,9 +158,10 @@ class LessonItem {
   }
 
   /// Numeric comparison with tolerance
+  /// Handles both digit strings ("40") and spoken words ("forty")
   bool _checkNumeric(String userAnswer) {
-    final userNum = double.tryParse(userAnswer.trim().replaceAll(RegExp(r'[^\d.-]'), ''));
-    final expectedNum = double.tryParse(answer.trim().replaceAll(RegExp(r'[^\d.-]'), ''));
+    final userNum = _parseSpokenNumber(userAnswer);
+    final expectedNum = double.tryParse(answer.trim());
 
     if (userNum == null || expectedNum == null) {
       // Fall back to exact match if parsing fails
@@ -144,6 +170,72 @@ class LessonItem {
 
     final tolerance = numericTolerance ?? 0.0;
     return (userNum - expectedNum).abs() <= tolerance;
+  }
+
+  /// Parse a number from either digits or spoken words
+  /// Handles: "40", "forty", "forty-two", "one hundred twenty three", etc.
+  static double? _parseSpokenNumber(String input) {
+    final cleaned = input.toLowerCase().trim();
+
+    // Try direct parse first (handles "40", "123", etc.)
+    final direct = double.tryParse(cleaned.replaceAll(RegExp(r'[^\d.-]'), ''));
+    if (direct != null) return direct;
+
+    // Convert spoken words to number
+    return _wordsToNumber(cleaned);
+  }
+
+  static final Map<String, int> _wordToNum = {
+    'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,
+    'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
+    'ten': 10, 'eleven': 11, 'twelve': 12, 'thirteen': 13,
+    'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17,
+    'eighteen': 18, 'nineteen': 19, 'twenty': 20, 'thirty': 30,
+    'forty': 40, 'fifty': 50, 'sixty': 60, 'seventy': 70,
+    'eighty': 80, 'ninety': 90,
+  };
+
+  static final Map<String, int> _multipliers = {
+    'hundred': 100,
+    'thousand': 1000,
+  };
+
+  /// Convert spoken number words to a numeric value
+  static double? _wordsToNumber(String input) {
+    // Normalize: replace hyphens with spaces, remove extra spaces
+    final normalized = input
+        .replaceAll('-', ' ')
+        .replaceAll(RegExp(r'[^a-z\s]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    if (normalized.isEmpty) return null;
+
+    final words = normalized.split(' ');
+    int total = 0;
+    int current = 0;
+
+    for (final word in words) {
+      if (_wordToNum.containsKey(word)) {
+        current += _wordToNum[word]!;
+      } else if (_multipliers.containsKey(word)) {
+        if (current == 0) current = 1;
+        current *= _multipliers[word]!;
+        if (word == 'thousand') {
+          total += current;
+          current = 0;
+        }
+      } else if (word == 'and') {
+        // Skip "and" (e.g., "one hundred and twenty")
+        continue;
+      } else {
+        // Unknown word - can't parse
+        return null;
+      }
+    }
+
+    total += current;
+    return total > 0 || normalized == 'zero' ? total.toDouble() : null;
   }
 
   /// Flexible matching (original behavior)

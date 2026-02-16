@@ -568,8 +568,8 @@ class _PersonalityRow extends StatelessWidget {
                 ? ElevatedButton(
                     onPressed: null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.dreamCloudBlue.withOpacity(0.25),
-                      foregroundColor: AppColors.dreamCloudBlue,
+                      backgroundColor: AppColors.success.withOpacity(0.25),
+                      foregroundColor: AppColors.success,
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.sm,
                         vertical: AppSpacing.sm,
@@ -577,8 +577,8 @@ class _PersonalityRow extends StatelessWidget {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      disabledBackgroundColor: AppColors.dreamCloudBlue.withOpacity(0.25),
-                      disabledForegroundColor: AppColors.dreamCloudBlue,
+                      disabledBackgroundColor: AppColors.success.withOpacity(0.25),
+                      disabledForegroundColor: AppColors.success,
                       elevation: 0,
                     ),
                     child: const Text(

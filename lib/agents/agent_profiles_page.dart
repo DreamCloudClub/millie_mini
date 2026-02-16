@@ -235,8 +235,8 @@ class _AgentCard extends StatelessWidget {
                 ? ElevatedButton(
                     onPressed: null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryOrange.withOpacity(0.25),
-                      foregroundColor: AppColors.primaryOrange,
+                      backgroundColor: AppColors.success.withOpacity(0.25),
+                      foregroundColor: AppColors.success,
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.md,
                         vertical: AppSpacing.sm,
@@ -244,8 +244,8 @@ class _AgentCard extends StatelessWidget {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      disabledBackgroundColor: AppColors.primaryOrange.withOpacity(0.25),
-                      disabledForegroundColor: AppColors.primaryOrange,
+                      disabledBackgroundColor: AppColors.success.withOpacity(0.25),
+                      disabledForegroundColor: AppColors.success,
                       elevation: 0,
                       minimumSize: const Size(0, 0), // Allow button to size to content
                     ),

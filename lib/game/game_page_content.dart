@@ -19,6 +19,7 @@ class GamePageContent extends StatefulWidget {
   final VoidCallback? onStart;
   final VoidCallback? onGamePause;
   final VoidCallback? onGameResume;
+  final VoidCallback? onRecord;
 
   const GamePageContent({
     super.key,
@@ -31,6 +32,7 @@ class GamePageContent extends StatefulWidget {
     this.onStart,
     this.onGamePause,
     this.onGameResume,
+    this.onRecord,
   });
 
   @override
@@ -38,6 +40,12 @@ class GamePageContent extends StatefulWidget {
 }
 
 class _GamePageContentState extends State<GamePageContent> {
+  /// Whether we're showing the math subcategory menu
+  bool _showMathMenu = false;
+
+  /// Track if game was running in previous frame (to detect game end)
+  bool _wasGameRunning = false;
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +74,15 @@ class _GamePageContentState extends State<GamePageContent> {
           builder: (context, voiceProvider, _) {
             final lessonState = voiceProvider.lessonState;
 
+            // Reset math submenu when returning from a game
+            final isGameRunning = lessonState.isGameRunning;
+            if (_wasGameRunning && !isGameRunning && _showMathMenu) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _showMathMenu = false);
+              });
+            }
+            _wasGameRunning = isGameRunning;
+
             return Column(
               children: [
                 // Top bar
@@ -73,9 +90,17 @@ class _GamePageContentState extends State<GamePageContent> {
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Row(
                     children: [
-                      // Green back button (left) - returns to games menu
+                      // Green back button (left) - returns to main menu or exits
                       GestureDetector(
-                        onTap: () => voiceProvider.endLessonMode(),
+                        onTap: () {
+                          if (_showMathMenu) {
+                            // Go back to main games menu
+                            setState(() => _showMathMenu = false);
+                          } else {
+                            // Exit games entirely
+                            voiceProvider.endLessonMode();
+                          }
+                        },
                         child: Container(
                           width: 44,
                           height: 44,
@@ -162,6 +187,7 @@ class _GamePageContentState extends State<GamePageContent> {
                   onStart: widget.onStart,
                   onGamePause: widget.onGamePause,
                   onGameResume: widget.onGameResume,
+                  onRecord: widget.onRecord,
                 ),
               ],
             );
@@ -173,16 +199,23 @@ class _GamePageContentState extends State<GamePageContent> {
 
   Widget _buildTimerArea(BuildContext context, VoiceProvider voiceProvider, LessonState lessonState) {
     final isPaused = voiceProvider.isGamePaused;
+    final gameController = voiceProvider.gameController;
 
-    // Just show status text - timer is now inside the content area
+    // Determine status text
+    String statusText;
+    if (isPaused) {
+      statusText = 'Paused';
+    } else if (lessonState.phase == LessonPhase.ask && !gameController.autoRecord) {
+      // Manual mode: waiting for user to press Answer
+      statusText = 'Press answer when ready...';
+    } else {
+      statusText = lessonState.statusText;
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Text(
-        isPaused
-            ? 'Paused'
-            : lessonState.isActive
-                ? lessonState.statusText
-                : voiceProvider.state.statusText,
+        statusText,
         style: TextStyle(
           fontFamily: AppTextStyles.fontFamily,
           fontSize: 14,
@@ -246,64 +279,153 @@ class _GamePageContentState extends State<GamePageContent> {
 
   Widget _buildMenuState(BuildContext context, VoiceProvider voiceProvider, LessonState lessonState) {
     final selectedCategory = lessonState.isSelected ? lessonState.category : null;
+    final customQuizzes = context.watch<CustomQuizProvider>().quizzes;
+
+    // Show math submenu if in math selection mode
+    if (_showMathMenu) {
+      return _buildMathSubMenu(context, voiceProvider, selectedCategory);
+    }
 
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        children: [
-          const Spacer(),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            // Game options - select category, then press Start
+            _GameOptionButton(
+              icon: Icons.psychology,
+              title: 'Riddles',
+              subtitle: 'Test your thinking',
+              isSelected: selectedCategory == 'riddle',
+              onTap: () => voiceProvider.selectLessonCategory('riddle'),
+            ),
 
-          // Game options - select category, then press Start
-          _GameOptionButton(
-            icon: Icons.psychology,
-            title: 'Riddles',
-            subtitle: 'Test your thinking',
-            isSelected: selectedCategory == 'riddle',
-            onTap: () => voiceProvider.selectLessonCategory('riddle'),
-          ),
+            const SizedBox(height: AppSpacing.md),
 
-          const SizedBox(height: AppSpacing.md),
+            _GameOptionButton(
+              icon: Icons.sentiment_very_satisfied,
+              title: 'Jokes',
+              subtitle: 'Laugh along',
+              isSelected: selectedCategory == 'joke',
+              onTap: () => voiceProvider.selectLessonCategory('joke'),
+            ),
 
-          _GameOptionButton(
-            icon: Icons.sentiment_very_satisfied,
-            title: 'Jokes',
-            subtitle: 'Laugh along',
-            isSelected: selectedCategory == 'joke',
-            onTap: () => voiceProvider.selectLessonCategory('joke'),
-          ),
+            const SizedBox(height: AppSpacing.md),
 
-          const SizedBox(height: AppSpacing.md),
+            _GameOptionButton(
+              icon: Icons.quiz_outlined,
+              title: 'Trivia',
+              subtitle: 'Test your knowledge',
+              isSelected: selectedCategory == 'trivia',
+              onTap: () => voiceProvider.selectLessonCategory('trivia'),
+            ),
 
-          _GameOptionButton(
-            icon: Icons.quiz_outlined,
-            title: 'Trivia',
-            subtitle: 'Test your knowledge',
-            isSelected: selectedCategory == 'trivia',
-            onTap: () => voiceProvider.selectLessonCategory('trivia'),
-          ),
+            const SizedBox(height: AppSpacing.md),
 
-          const SizedBox(height: AppSpacing.md),
+            _GameOptionButton(
+              icon: Icons.spellcheck,
+              title: 'Spelling',
+              subtitle: 'Spell words out loud',
+              isSelected: selectedCategory == 'spelling',
+              onTap: () => voiceProvider.selectLessonCategory('spelling'),
+            ),
 
-          _GameOptionButton(
-            icon: Icons.spellcheck,
-            title: 'Spelling',
-            subtitle: 'Spell words out loud',
-            isSelected: selectedCategory == 'spelling',
-            onTap: () => voiceProvider.selectLessonCategory('spelling'),
-          ),
+            const SizedBox(height: AppSpacing.md),
 
-          const SizedBox(height: AppSpacing.md),
+            _GameOptionButton(
+              icon: Icons.calculate,
+              title: 'Math',
+              subtitle: 'Practice arithmetic',
+              isSelected: selectedCategory?.startsWith('math') ?? false,
+              onTap: () => setState(() => _showMathMenu = true),
+            ),
 
-          _GameOptionButton(
-            icon: Icons.shuffle,
-            title: 'Random',
-            subtitle: 'Mix it up',
-            isSelected: selectedCategory == 'random',
-            onTap: () => voiceProvider.selectLessonCategory('random'),
-          ),
+            const SizedBox(height: AppSpacing.md),
 
-          const Spacer(),
-        ],
+            _GameOptionButton(
+              icon: Icons.shuffle,
+              title: 'Random',
+              subtitle: 'Mix it up',
+              isSelected: selectedCategory == 'random',
+              onTap: () => voiceProvider.selectLessonCategory('random'),
+            ),
+
+            // Custom quizzes
+            ...customQuizzes.map((quiz) => Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.md),
+              child: _GameOptionButton(
+                icon: Icons.auto_awesome,
+                title: quiz.name,
+                subtitle: quiz.categoriesDisplay,
+                isSelected: selectedCategory == 'custom:${quiz.id}',
+                onTap: () => voiceProvider.selectLessonCategory('custom:${quiz.id}'),
+              ),
+            )),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMathSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _GameOptionButton(
+              icon: Icons.add,
+              title: 'Addition',
+              subtitle: 'Practice adding numbers',
+              isSelected: selectedCategory == 'math:addition',
+              onTap: () => voiceProvider.selectLessonCategory('math:addition'),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
+              icon: Icons.remove,
+              title: 'Subtraction',
+              subtitle: 'Practice subtracting numbers',
+              isSelected: selectedCategory == 'math:subtraction',
+              onTap: () => voiceProvider.selectLessonCategory('math:subtraction'),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
+              icon: Icons.close,
+              title: 'Multiplication',
+              subtitle: 'Practice multiplying numbers',
+              isSelected: selectedCategory == 'math:multiplication',
+              onTap: () => voiceProvider.selectLessonCategory('math:multiplication'),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
+              icon: Icons.safety_divider,
+              title: 'Division',
+              subtitle: 'Practice dividing numbers',
+              isSelected: selectedCategory == 'math:division',
+              onTap: () => voiceProvider.selectLessonCategory('math:division'),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
+              icon: Icons.shuffle,
+              title: 'Random',
+              subtitle: 'Mix all operations',
+              isSelected: selectedCategory == 'math:random',
+              onTap: () => voiceProvider.selectLessonCategory('math:random'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
       ),
     );
   }
@@ -328,6 +450,16 @@ class _GamePageContentState extends State<GamePageContent> {
 
   /// Get intro title and subtitle for a category
   (String title, String subtitle) _getIntroText(String category) {
+    // Handle custom quiz
+    if (category.startsWith('custom:')) {
+      final quizId = category.substring(7);
+      final quiz = context.read<CustomQuizProvider>().getQuizById(quizId);
+      if (quiz != null) {
+        return ("Let's play ${quiz.name}!", "I'll mix in some ${quiz.categoriesDisplay.toLowerCase()}.");
+      }
+      return ("Let's play!", "I'll ask you some questions.");
+    }
+
     switch (category.toLowerCase()) {
       case 'riddle':
       case 'riddles':
@@ -339,6 +471,17 @@ class _GamePageContentState extends State<GamePageContent> {
         return ("Let's test your knowledge!", "I'll ask you some trivia questions.");
       case 'spelling':
         return ("Let's practice spelling!", "I'll show you a word and you spell it out loud, letter by letter.");
+      case 'math':
+      case 'math:random':
+        return ("Let's practice math!", "I'll give you some problems to solve.");
+      case 'math:addition':
+        return ("Let's practice addition!", "I'll give you some problems to solve.");
+      case 'math:subtraction':
+        return ("Let's practice subtraction!", "I'll give you some problems to solve.");
+      case 'math:multiplication':
+        return ("Let's practice multiplication!", "I'll give you some problems to solve.");
+      case 'math:division':
+        return ("Let's practice division!", "I'll give you some problems to solve.");
       default:
         return ("Let's play!", "I'll ask you some questions.");
     }
@@ -416,56 +559,58 @@ class _GamePageContentState extends State<GamePageContent> {
     final word = lessonState.displayQuestion;
 
     return Padding(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(
+        vertical: AppSpacing.lg,
+        horizontal: AppSpacing.lg,
+      ),
       child: Column(
         children: [
           // Progress indicator
           if (lessonState.questionCount > 0)
-            Text(
-              lessonState.progressText,
-              style: TextStyle(
-                fontFamily: AppTextStyles.fontFamily,
-                fontSize: 14,
-                color: Colors.white.withOpacity(0.6),
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: Text(
+                lessonState.progressText,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: 14,
+                  color: Colors.white.withOpacity(0.6),
+                ),
               ),
             ),
 
-          const Spacer(),
+          const Spacer(flex: 1),
 
-          // LARGE WORD DISPLAY
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-            decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.blue.withOpacity(0.3), width: 2),
-            ),
-            child: Text(
-              word.isEmpty ? '...' : word.toUpperCase(),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: AppTextStyles.fontFamily,
-                fontSize: 64,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 4,
-              ),
+          // LARGE WORD DISPLAY - clean style like Riddles
+          Text(
+            word.isEmpty ? '...' : word.toLowerCase(),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 72,
+              fontWeight: FontWeight.w500,
+              color: Colors.white,
+              letterSpacing: 3,
             ),
           ),
 
-          const Spacer(),
+          const Spacer(flex: 1),
 
           // Timer during LISTEN phase, Answer during FEEDBACK phase
           _buildTimerOrAnswer(context, lessonState),
+
+          const Spacer(flex: 1),
         ],
       ),
     );
   }
 
   Widget _buildDefaultDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
-    final showAnswer = lessonState.isCorrect != null;
     final questionText = lessonState.displayQuestion;
-    final answerText = lessonState.displayAnswer;
+    final isMath = lessonState.currentItem?.type == 'math';
+
+    // Check if this is a multi-digit math problem that should be stacked
+    final shouldStack = isMath && _shouldStackMathProblem(questionText);
 
     return Padding(
       padding: const EdgeInsets.symmetric(
@@ -490,18 +635,22 @@ class _GamePageContentState extends State<GamePageContent> {
 
           const Spacer(flex: 1),
 
-          // Main question in large text
-          Text(
-            questionText,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: AppTextStyles.fontFamily,
-              fontSize: 28,
-              fontWeight: FontWeight.w400,
-              color: Colors.white,
-              height: 1.3,
+          // Main question - stacked for multi-digit math, horizontal otherwise
+          if (shouldStack)
+            _buildStackedMathDisplay(questionText)
+          else
+            Text(
+              questionText,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: AppTextStyles.fontFamily,
+                fontSize: isMath ? 64 : 28,
+                fontWeight: isMath ? FontWeight.w600 : FontWeight.w400,
+                color: Colors.white,
+                height: 1.3,
+                letterSpacing: isMath ? 2 : 0,
+              ),
             ),
-          ),
 
           const Spacer(flex: 1),
 
@@ -511,6 +660,108 @@ class _GamePageContentState extends State<GamePageContent> {
           const Spacer(flex: 1),
         ],
       ),
+    );
+  }
+
+  /// Check if a math problem should be displayed in stacked format
+  /// Stack if either operand has 2+ digits (medium/hard problems)
+  bool _shouldStackMathProblem(String question) {
+    final parts = _parseMathProblem(question);
+    if (parts == null) return false;
+
+    final (num1, _, num2) = parts;
+    // Stack if either number has 2+ digits
+    return num1.length >= 2 || num2.length >= 2;
+  }
+
+  /// Parse a math problem string like "88 × 12" into (num1, operator, num2)
+  /// Returns null if parsing fails
+  (String, String, String)? _parseMathProblem(String question) {
+    // Match patterns like "88 × 12", "5 + 3", "45 - 8", "24 ÷ 6"
+    final regex = RegExp(r'^(\d+)\s*([+\-×÷])\s*(\d+)$');
+    final match = regex.firstMatch(question.trim());
+
+    if (match == null) return null;
+
+    return (match.group(1)!, match.group(2)!, match.group(3)!);
+  }
+
+  /// Build a stacked vertical math display for multi-digit problems
+  /// Shows the problem in traditional vertical format:
+  ///     23
+  ///   ×  4
+  ///   ────
+  Widget _buildStackedMathDisplay(String question) {
+    final parts = _parseMathProblem(question);
+    if (parts == null) {
+      // Fallback to horizontal display
+      return Text(
+        question,
+        style: const TextStyle(
+          fontFamily: AppTextStyles.fontFamily,
+          fontSize: 64,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+          letterSpacing: 2,
+        ),
+      );
+    }
+
+    final (num1, operator, num2) = parts;
+
+    // Calculate the width needed based on the longer number
+    final maxDigits = num1.length > num2.length ? num1.length : num2.length;
+    // Each digit is roughly 36px wide at fontSize 56, plus some padding for operator
+    final lineWidth = (maxDigits + 2) * 36.0;
+
+    const numberStyle = TextStyle(
+      fontFamily: AppTextStyles.fontFamily,
+      fontSize: 56,
+      fontWeight: FontWeight.w600,
+      color: Colors.white,
+      letterSpacing: 4,
+      height: 1.2,
+    );
+
+    const operatorStyle = TextStyle(
+      fontFamily: AppTextStyles.fontFamily,
+      fontSize: 48,
+      fontWeight: FontWeight.w500,
+      color: Colors.white,
+    );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // First number (right-aligned)
+        Text(num1, style: numberStyle),
+
+        const SizedBox(height: 4),
+
+        // Operator + second number row
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(operator, style: operatorStyle),
+            const SizedBox(width: 12),
+            Text(num2, style: numberStyle),
+          ],
+        ),
+
+        const SizedBox(height: 8),
+
+        // Horizontal line
+        Container(
+          width: lineWidth,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ],
     );
   }
 
@@ -541,42 +792,51 @@ class _GamePageContentState extends State<GamePageContent> {
 
   Widget _buildAnswerFeedback(LessonState lessonState) {
     final answerText = lessonState.displayAnswer;
+    final isCorrect = lessonState.isCorrect == true;
+
+    // For spelling mode, space out the letters: "apple" -> "a  p  p  l  e"
+    final displayText = lessonState.isSpellingMode
+        ? answerText.toLowerCase().split('').join('  ')
+        : answerText;
 
     return Container(
+      width: double.infinity,
       margin: const EdgeInsets.only(top: AppSpacing.lg),
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(
+        vertical: AppSpacing.xl,
+        horizontal: AppSpacing.lg,
+      ),
       decoration: BoxDecoration(
+        color: isCorrect
+            ? Colors.green.withOpacity(0.1)
+            : Colors.orange.withOpacity(0.1),
         border: Border.all(
-          color: lessonState.isCorrect == true
+          color: isCorrect
               ? Colors.green.withOpacity(0.5)
               : Colors.orange.withOpacity(0.5),
-          width: 1,
+          width: 2,
         ),
-        borderRadius: BorderRadius.circular(AppBorderRadius.medium),
+        borderRadius: BorderRadius.circular(AppBorderRadius.large),
       ),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // Correct/incorrect indicator
           Icon(
-            lessonState.isCorrect == true
-                ? Icons.check_circle
-                : Icons.info_outline,
-            color: lessonState.isCorrect == true
-                ? Colors.green
-                : Colors.orange,
-            size: 32,
+            isCorrect ? Icons.check_circle : Icons.info_outline,
+            color: isCorrect ? Colors.green : Colors.orange,
+            size: 48,
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
           Text(
-            answerText,
+            displayText,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: AppTextStyles.fontFamily,
-              fontSize: 24,
-              fontWeight: FontWeight.w500,
-              color: lessonState.isCorrect == true
-                  ? Colors.green
-                  : Colors.orange,
+              fontSize: lessonState.isSpellingMode ? 40 : 32,
+              fontWeight: FontWeight.w600,
+              letterSpacing: lessonState.isSpellingMode ? 4 : 0,
+              color: isCorrect ? Colors.green : Colors.orange,
             ),
           ),
         ],

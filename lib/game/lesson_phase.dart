@@ -32,7 +32,7 @@ extension LessonPhaseExtension on LessonPhase {
   String get statusText {
     switch (this) {
       case LessonPhase.idle:
-        return 'Ready';
+        return 'Select Topic';
       case LessonPhase.selected:
         return 'Press Start';
       case LessonPhase.intro:

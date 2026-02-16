@@ -933,6 +933,18 @@ class VoicePipelineService {
     await _startWakeWordListening();
   }
   
+  /// Force stop any audio playback immediately
+  Future<void> forceStopAudio() async {
+    debugPrint('Force stopping audio playback');
+    try {
+      await _player.stop();
+      _isPlaying = false;
+    } catch (e) {
+      debugPrint('Error force stopping audio: $e');
+      _isPlaying = false;
+    }
+  }
+
   /// Stop continuous mode completely - full context wipe
   Future<void> stopContinuousMode() async {
     debugPrint('Stopping continuous mode - full context wipe');

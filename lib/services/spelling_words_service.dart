@@ -11,7 +11,11 @@ class SpellingWordsService {
 
   /// Get the next spelling word (prioritizes unseen, then oldest seen)
   /// If difficulty is provided, filters by difficulty level
-  static Future<SpellingWord?> getNextWord({String? difficulty}) async {
+  /// If excludeIds is provided, skips words with those IDs (for current session)
+  static Future<SpellingWord?> getNextWord({
+    String? difficulty,
+    Set<String>? excludeIds,
+  }) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) {
@@ -48,8 +52,18 @@ class SpellingWordsService {
         return null;
       }
 
+      // Filter out excluded IDs (already asked this session)
+      final filteredWords = excludeIds != null && excludeIds.isNotEmpty
+          ? wordsResponse.where((w) => !excludeIds.contains(w['id'] as String)).toList()
+          : wordsResponse;
+
+      if (filteredWords.isEmpty) {
+        debugPrint('SpellingWordsService: All words already asked this session');
+        return null;
+      }
+
       // Sort: words not in history first (never seen), then by oldest seen
-      wordsResponse.sort((a, b) {
+      filteredWords.sort((a, b) {
         final aUsed = historyMap[a['id'] as String];
         final bUsed = historyMap[b['id'] as String];
 
@@ -59,7 +73,7 @@ class SpellingWordsService {
         return aUsed.compareTo(bUsed); // older usage comes first
       });
 
-      final word = SpellingWord.fromJson(wordsResponse.first);
+      final word = SpellingWord.fromJson(filteredWords.first);
       debugPrint(
           'SpellingWordsService: Got word ${word.word} (difficulty: ${word.difficulty}) for user $userId');
       return word;
@@ -79,11 +93,14 @@ class SpellingWordsService {
         return;
       }
 
-      await _supabase.from(_historyTable).upsert({
-        'user_id': userId,
-        'word_id': wordId,
-        'last_used_at': DateTime.now().toIso8601String(),
-      });
+      await _supabase.from(_historyTable).upsert(
+        {
+          'user_id': userId,
+          'word_id': wordId,
+          'last_used_at': DateTime.now().toIso8601String(),
+        },
+        onConflict: 'user_id,word_id',
+      );
       debugPrint(
           'SpellingWordsService: Marked $wordId as used for user $userId');
     } catch (e) {

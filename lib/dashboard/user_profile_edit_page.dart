@@ -200,6 +200,7 @@ class _UserProfileEditPageState extends State<UserProfileEditPage> {
                   onPressed: _isLoading ? null : _handleSave,
                   isLoading: _isLoading,
                   isFullWidth: true,
+                  customColor: AppColors.dreamCloudBlue,
                 ),
               ],
             ),

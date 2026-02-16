@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../utils/constants.dart';
 import '../providers/providers.dart';
 import '../models/models.dart';
+import '../game/lesson_phase.dart';
 
 class ControlBar extends StatelessWidget {
   final VoidCallback onPause;
@@ -13,6 +14,7 @@ class ControlBar extends StatelessWidget {
   final VoidCallback? onStart;
   final VoidCallback? onGamePause;
   final VoidCallback? onGameResume;
+  final VoidCallback? onRecord;
 
   const ControlBar({
     super.key,
@@ -24,6 +26,7 @@ class ControlBar extends StatelessWidget {
     this.onStart,
     this.onGamePause,
     this.onGameResume,
+    this.onRecord,
   });
 
   @override
@@ -34,6 +37,10 @@ class ControlBar extends StatelessWidget {
         final isGameSelected = voiceProvider.isGameSelected;
         final isGameRunning = voiceProvider.isGameRunning;
         final isGamePaused = voiceProvider.isGamePaused;
+        final gameController = voiceProvider.gameController;
+        final isWaitingForRecord = isGameRunning &&
+            !gameController.autoRecord &&
+            gameController.phase == LessonPhase.ask;
 
         return Container(
           margin: const EdgeInsets.only(
@@ -75,13 +82,21 @@ class ControlBar extends StatelessWidget {
                   buttonColor: Colors.green,
                 ),
 
-              // Middle button: Start/Pause/Play based on state
+              // Middle button: Start/Pause/Play/Record based on state
               if (isGameSelected && onStart != null)
                 // Category selected, show Start button
                 _ControlButton(
                   icon: Icons.play_arrow,
                   label: 'Start',
                   onTap: onStart!,
+                  buttonColor: Colors.blue,
+                )
+              else if (isWaitingForRecord && onRecord != null)
+                // Waiting for user to submit answer (auto-record off)
+                _ControlButton(
+                  icon: Icons.play_arrow,
+                  label: 'Answer',
+                  onTap: onRecord!,
                   buttonColor: Colors.blue,
                 )
               else if (isGameRunning)

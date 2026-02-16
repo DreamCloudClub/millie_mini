@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'lesson_phase.dart';
 import 'lesson_item.dart';
 import '../services/game_questions_service.dart';
 import '../services/spelling_words_service.dart';
+import '../services/math_problem_service.dart';
+import '../providers/custom_quiz_provider.dart';
 
 /// Callback type for TTS playback
 typedef TTSCallback = Future<void> Function(String text);
@@ -45,6 +48,12 @@ class GameController extends ChangeNotifier {
 
   /// Difficulty filter for questions
   String? _difficultyFilter;
+
+  /// Auto-record setting (when false, user must press Record to answer)
+  bool _autoRecord = true;
+
+  /// Reference to CustomQuizProvider for resolving custom quiz categories
+  CustomQuizProvider? _customQuizProvider;
 
   /// Callbacks for TTS and mic control (wired from VoiceProvider/Pipeline)
   TTSCallback? onPlayTTS;
@@ -93,6 +102,9 @@ class GameController extends ChangeNotifier {
   /// Current difficulty filter
   String? get difficultyFilter => _difficultyFilter;
 
+  /// Whether auto-record is enabled
+  bool get autoRecord => _autoRecord;
+
   // ============================================================
   // SETTINGS CONFIGURATION
   // ============================================================
@@ -109,6 +121,18 @@ class GameController extends ChangeNotifier {
     debugPrint('GameController: Difficulty filter set to $difficulty');
   }
 
+  /// Set the auto-record setting
+  void setAutoRecord(bool autoRecord) {
+    _autoRecord = autoRecord;
+    debugPrint('GameController: Auto-record set to $autoRecord');
+  }
+
+  /// Set the CustomQuizProvider reference
+  void setCustomQuizProvider(CustomQuizProvider provider) {
+    _customQuizProvider = provider;
+    debugPrint('GameController: CustomQuizProvider set');
+  }
+
   /// Cancel any active countdown timer
   void _cancelTimer() {
     if (_countdownTimer != null) {
@@ -119,7 +143,7 @@ class GameController extends ChangeNotifier {
     }
   }
 
-  /// Start the countdown timer
+  /// Start the countdown timer (visible, for auto-record mode)
   void _startTimer() {
     if (_timeLimitSeconds == null || _timeLimitSeconds! <= 0) {
       return;
@@ -141,6 +165,17 @@ class GameController extends ChangeNotifier {
       if (_remainingSeconds! <= 0) {
         _handleTimerExpired();
       }
+    });
+  }
+
+  /// Start a silent safety timeout (30 seconds max, for manual record mode)
+  /// No visible countdown - just a safety limit
+  void _startSafetyTimeout() {
+    debugPrint('GameController: Starting 30-second safety timeout (no visible countdown)');
+    // Don't set _remainingSeconds - this keeps the UI from showing a countdown
+    _countdownTimer = Timer(const Duration(seconds: 30), () {
+      debugPrint('GameController: Safety timeout expired');
+      _handleTimerExpired();
     });
   }
 
@@ -382,8 +417,11 @@ class GameController extends ChangeNotifier {
         break;
 
       case LessonPhase.ask:
-        // After asking question, start listening
-        _transitionToListen();
+        // After asking question, start listening (only if auto-record is on)
+        if (_autoRecord) {
+          _transitionToListen();
+        }
+        // If auto-record is off, stay in ASK phase - user must press Record button
         break;
 
       case LessonPhase.feedback:
@@ -478,8 +516,13 @@ class GameController extends ChangeNotifier {
     _state = _state.copyWith(phase: LessonPhase.listen);
     notifyListeners();
 
-    // Start countdown timer if time limit is set
-    _startTimer();
+    // Start countdown timer only if auto-record is ON and time limit is set
+    // When auto-record is OFF, use a silent 30-second safety timeout
+    if (_autoRecord) {
+      _startTimer();
+    } else {
+      _startSafetyTimeout();
+    }
 
     debugPrint('FSM: calling onStartMic (session=$_sessionId, callback=${onStartMic != null})');
 
@@ -594,18 +637,35 @@ class GameController extends ChangeNotifier {
   /// Get next item for the category
   /// Routes to appropriate service based on category
   Future<LessonItem?> _getNextItem(String category) async {
+    // Custom quiz: picks a random category from the quiz's category list
+    if (category.startsWith('custom:')) {
+      return _getNextFromCustomQuiz(category.substring(7)); // Remove 'custom:' prefix
+    }
+
+    // Random: pick from ALL categories including spelling and math
+    if (category == 'random') {
+      return _getNextRandomItem();
+    }
+
+    // Math uses procedural generation (supports math:operation format)
+    if (category == 'math' || category.startsWith('math:')) {
+      return _getNextMathProblem(category);
+    }
+
     // Spelling uses its own table/service
     if (category == 'spelling') {
       return _getNextSpellingWord();
     }
 
     // All other categories use game_questions table
+    // Pass excludeIds to filter out questions already asked this session
     final dbQuestion = await GameQuestionsService.getNextQuestion(
-      category == 'random' ? 'random' : category,
+      category,
       difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
     );
 
-    if (dbQuestion != null && !_askedItemIds.contains(dbQuestion.id)) {
+    if (dbQuestion != null) {
       // Mark as used in database
       await GameQuestionsService.markAsUsed(dbQuestion.id);
 
@@ -633,12 +693,14 @@ class GameController extends ChangeNotifier {
 
   /// Get next spelling word from spelling_words table
   Future<LessonItem?> _getNextSpellingWord() async {
+    // Pass excludeIds to filter out words already asked this session
     final word = await SpellingWordsService.getNextWord(
       difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
     );
 
-    if (word != null && !_askedItemIds.contains(word.id)) {
-      // Mark as used
+    if (word != null) {
+      // Mark as used in database
       await SpellingWordsService.markAsUsed(word.id);
 
       return LessonItem(
@@ -653,11 +715,138 @@ class GameController extends ChangeNotifier {
     return null;
   }
 
+  /// Get next item from a truly random mix of ALL categories
+  /// Includes: riddle, joke, trivia, spelling, math
+  Future<LessonItem?> _getNextRandomItem() async {
+    // All available categories
+    const allCategories = ['riddle', 'joke', 'trivia', 'spelling', 'math'];
+
+    // Shuffle and try each until we find one with available items
+    final shuffled = List<String>.from(allCategories)..shuffle(Random());
+
+    for (final category in shuffled) {
+      LessonItem? item;
+
+      if (category == 'spelling') {
+        item = await _getNextSpellingWord();
+      } else if (category == 'math') {
+        item = await _getNextMathProblem('math');
+      } else {
+        // riddle, joke, trivia from game_questions
+        final dbQuestion = await GameQuestionsService.getNextQuestion(
+          category,
+          difficulty: _difficultyFilter,
+          excludeIds: _askedItemIds,
+        );
+
+        if (dbQuestion != null) {
+          await GameQuestionsService.markAsUsed(dbQuestion.id);
+          item = LessonItem(
+            id: dbQuestion.id,
+            type: dbQuestion.category,
+            prompt: dbQuestion.question,
+            answer: dbQuestion.answer,
+            gradingType: GradingType.flexible,
+          );
+        }
+      }
+
+      if (item != null) {
+        return item;
+      }
+    }
+
+    return null;
+  }
+
+  /// Get next procedurally-generated math problem
+  /// Category can be 'math' or 'math:operation' (e.g., 'math:addition')
+  Future<LessonItem?> _getNextMathProblem(String category) async {
+    // Parse operation from category (e.g., 'math:addition' -> 'addition')
+    String? operation;
+    if (category.contains(':')) {
+      operation = category.split(':')[1];
+      if (operation == 'random') operation = null; // Random = no filter
+    }
+
+    final problem = MathProblemService.generate(
+      difficulty: _difficultyFilter,
+      operation: operation,
+    );
+
+    return LessonItem(
+      id: 'math_${DateTime.now().millisecondsSinceEpoch}',
+      type: 'math',
+      prompt: problem.question,
+      answer: problem.answer,
+      gradingType: GradingType.numeric,
+    );
+  }
+
+  /// Get next item from a custom quiz (randomly picks from its categories)
+  Future<LessonItem?> _getNextFromCustomQuiz(String quizId) async {
+    if (_customQuizProvider == null) {
+      debugPrint('GameController: No CustomQuizProvider set');
+      return null;
+    }
+
+    final quiz = _customQuizProvider!.getQuizById(quizId);
+    if (quiz == null || quiz.categories.isEmpty) {
+      debugPrint('GameController: Quiz not found or has no categories: $quizId');
+      return null;
+    }
+
+    // Randomly pick a category from the quiz's list
+    final random = Random();
+    final category = quiz.categories[random.nextInt(quiz.categories.length)];
+    debugPrint('GameController: Custom quiz "$quizId" picked category: $category');
+
+    // Route to appropriate service based on picked category
+    if (category == 'spelling') {
+      return _getNextSpellingWord();
+    }
+
+    if (category == 'math' || category.startsWith('math:')) {
+      return _getNextMathProblem(category);
+    }
+
+    // Use game_questions for other categories
+    final dbQuestion = await GameQuestionsService.getNextQuestion(
+      category,
+      difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
+    );
+
+    if (dbQuestion != null) {
+      await GameQuestionsService.markAsUsed(dbQuestion.id);
+
+      return LessonItem(
+        id: dbQuestion.id,
+        type: dbQuestion.category,
+        prompt: dbQuestion.question,
+        answer: dbQuestion.answer,
+        gradingType: GradingType.flexible,
+      );
+    }
+
+    return null;
+  }
+
   // ============================================================
   // TEXT GENERATION HELPERS
   // ============================================================
 
   String _getIntroText(String category) {
+    // Handle custom quiz
+    if (category.startsWith('custom:')) {
+      final quizId = category.substring(7);
+      final quiz = _customQuizProvider?.getQuizById(quizId);
+      if (quiz != null) {
+        return "Let's play ${quiz.name}! I'll mix in some ${quiz.categoriesDisplay.toLowerCase()}.";
+      }
+      return "Let's play! I'll ask you some questions.";
+    }
+
     switch (category.toLowerCase()) {
       case 'riddle':
       case 'riddles':
@@ -669,6 +858,17 @@ class GameController extends ChangeNotifier {
         return "Let's test your knowledge! I'll ask you some trivia questions.";
       case 'spelling':
         return "Let's practice spelling! I'll show you a word and you spell it out loud, letter by letter.";
+      case 'math':
+      case 'math:random':
+        return "Let's practice math! I'll give you some problems to solve.";
+      case 'math:addition':
+        return "Let's practice addition! I'll give you some problems to solve.";
+      case 'math:subtraction':
+        return "Let's practice subtraction! I'll give you some problems to solve.";
+      case 'math:multiplication':
+        return "Let's practice multiplication! I'll give you some problems to solve.";
+      case 'math:division':
+        return "Let's practice division! I'll give you some problems to solve.";
       default:
         return "Let's play! I'll ask you some questions.";
     }
@@ -704,6 +904,15 @@ class GameController extends ChangeNotifier {
   }
 
   String _getIncorrectFeedback(String correctAnswer) {
+    // For spelling mode, spell out each letter clearly for TTS
+    if (_state.currentItem?.gradingType == GradingType.spelling) {
+      // Say the word, then spell each letter as a separate sentence
+      // "apple" becomes "apple. A. P. P. L. E."
+      // Using periods forces TTS to pause between each letter
+      final letters = correctAnswer.toUpperCase().split('');
+      final spelled = letters.map((l) => '$l.').join(' ');
+      return "${correctAnswer.toLowerCase()}. $spelled";
+    }
     return "The answer is: $correctAnswer.";
   }
 
@@ -817,6 +1026,22 @@ class GameController extends ChangeNotifier {
     } else {
       _fetchAndAskNextQuestion();
     }
+  }
+
+  /// Manually start recording (for when auto-record is off)
+  Future<void> startRecording() async {
+    if (!_state.isActive || _isExiting) {
+      return;
+    }
+
+    // Only allow if we're in ASK phase (waiting for user to press Record)
+    if (_state.phase != LessonPhase.ask) {
+      debugPrint('GameController: Cannot start recording - not in ASK phase (current: ${_state.phase})');
+      return;
+    }
+
+    debugPrint('GameController: Manual recording start');
+    await _transitionToListen();
   }
 
   /// Repeat current question

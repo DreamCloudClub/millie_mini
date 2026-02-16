@@ -407,6 +407,11 @@ class _GameSettingsCard extends StatelessWidget {
                 value: settings.difficulty.displayName,
                 compactSpacing: true,
               ),
+              _DetailRow(
+                label: 'Auto-Record',
+                value: settings.autoRecord ? 'On' : 'Off',
+                compactSpacing: true,
+              ),
             ],
           ),
         );

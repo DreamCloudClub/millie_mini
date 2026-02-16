@@ -151,6 +151,7 @@ class _PersonalityBuilderPageState extends State<PersonalityBuilderPage> {
       confirmLabel: 'Delete',
       cancelLabel: 'Cancel',
       isDangerous: true,
+      confirmColor: AppColors.primaryOrange,
     );
 
     if (confirmed && mounted) {
@@ -247,15 +248,16 @@ class _PersonalityBuilderPageState extends State<PersonalityBuilderPage> {
               label: 'Save Personality',
               onPressed: _handleSave,
               isFullWidth: true,
+              customColor: AppColors.dreamCloudBlue,
             ),
-            
+
             if (canDelete) ...[
               const SizedBox(height: AppSpacing.md),
               AppButton(
                 label: 'Delete Personality',
                 onPressed: _handleDelete,
                 isFullWidth: true,
-                customColor: AppColors.error,
+                customColor: AppColors.primaryOrange,
               ),
             ],
             const SizedBox(height: AppSpacing.lg),

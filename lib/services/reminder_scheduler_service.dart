@@ -487,11 +487,19 @@ class ReminderSchedulerService {
   Future<void> _handleDueReminder(Reminder reminder) async {
     try {
       debugPrint('ReminderSchedulerService: Reminder due - ${reminder.title}');
-      
+
       // Check if we're on the face page
       if (_isOnFacePage) {
         // On face page: only use voice alerts, no pop-up notifications
         if (_voiceProvider != null) {
+          // Check if a game/quiz is running - queue for after game ends
+          if (_voiceProvider!.isGameRunning) {
+            debugPrint('ReminderSchedulerService: Game is running, queuing voice alert for after game');
+            _pendingVoiceAlerts.add(reminder);
+            // Don't mark as sent yet - will be marked when triggered after game
+            return; // Queued, done
+          }
+
           final state = _voiceProvider!.state;
           if (state == VoiceState.paused || state == VoiceState.sleep) {
             // Ready mode: trigger voice alert immediately

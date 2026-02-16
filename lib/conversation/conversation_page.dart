@@ -337,7 +337,7 @@ class _ConversationPageState extends State<ConversationPage> {
     );
 
     final voiceProvider = context.read<VoiceProvider>();
-    voiceProvider.endLessonMode(); // Reset game state
+    await voiceProvider.endLessonMode(); // Reset game state
     await voiceProvider.endSession();
     await Future.delayed(const Duration(milliseconds: 300));
 
@@ -390,6 +390,7 @@ class _ConversationPageState extends State<ConversationPage> {
             },
             onGamePause: () => context.read<VoiceProvider>().pauseGame(),
             onGameResume: () => context.read<VoiceProvider>().resumeGame(),
+            onRecord: () => context.read<VoiceProvider>().startGameRecording(),
           ),
 
           // Page 1: Chat/Image Page

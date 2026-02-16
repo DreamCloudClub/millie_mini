@@ -90,10 +90,12 @@ extension GameDifficultyExtension on GameDifficulty {
 class GameSettings {
   final TimeLimit timeLimit;
   final GameDifficulty difficulty;
+  final bool autoRecord; // When true, mic starts automatically after question
 
   const GameSettings({
     this.timeLimit = TimeLimit.none,
     this.difficulty = GameDifficulty.medium,
+    this.autoRecord = true,
   });
 
   /// Default settings
@@ -103,6 +105,7 @@ class GameSettings {
     return GameSettings(
       timeLimit: TimeLimitExtension.fromString(json['time_limit'] as String?),
       difficulty: GameDifficultyExtension.fromString(json['difficulty'] as String?),
+      autoRecord: json['auto_record'] as bool? ?? true,
     );
   }
 
@@ -110,16 +113,19 @@ class GameSettings {
     return {
       'time_limit': timeLimit.name,
       'difficulty': difficulty.name,
+      'auto_record': autoRecord,
     };
   }
 
   GameSettings copyWith({
     TimeLimit? timeLimit,
     GameDifficulty? difficulty,
+    bool? autoRecord,
   }) {
     return GameSettings(
       timeLimit: timeLimit ?? this.timeLimit,
       difficulty: difficulty ?? this.difficulty,
+      autoRecord: autoRecord ?? this.autoRecord,
     );
   }
 
@@ -128,14 +134,15 @@ class GameSettings {
     if (identical(this, other)) return true;
     return other is GameSettings &&
         other.timeLimit == timeLimit &&
-        other.difficulty == difficulty;
+        other.difficulty == difficulty &&
+        other.autoRecord == autoRecord;
   }
 
   @override
-  int get hashCode => timeLimit.hashCode ^ difficulty.hashCode;
+  int get hashCode => timeLimit.hashCode ^ difficulty.hashCode ^ autoRecord.hashCode;
 
   @override
   String toString() {
-    return 'GameSettings(timeLimit: ${timeLimit.displayName}, difficulty: ${difficulty.displayName})';
+    return 'GameSettings(timeLimit: ${timeLimit.displayName}, difficulty: ${difficulty.displayName}, autoRecord: $autoRecord)';
   }
 }

@@ -12,10 +12,12 @@ class GameQuestionsService {
   /// Get the next question for a category (prioritizes unseen, then oldest seen)
   /// If category is 'random', picks from any category
   /// If difficulty is provided, filters by difficulty level
+  /// If excludeIds is provided, skips questions with those IDs (for current session)
   /// Tracks usage per authenticated user
   static Future<GameQuestion?> getNextQuestion(
     String category, {
     String? difficulty,
+    Set<String>? excludeIds,
   }) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -57,8 +59,18 @@ class GameQuestionsService {
         return null;
       }
 
+      // Filter out excluded IDs (already asked this session)
+      final filteredQuestions = excludeIds != null && excludeIds.isNotEmpty
+          ? questionsResponse.where((q) => !excludeIds.contains(q['id'] as String)).toList()
+          : questionsResponse;
+
+      if (filteredQuestions.isEmpty) {
+        debugPrint('GameQuestionsService: All questions already asked this session');
+        return null;
+      }
+
       // Sort: questions not in history first (never seen), then by oldest seen
-      questionsResponse.sort((a, b) {
+      filteredQuestions.sort((a, b) {
         final aUsed = historyMap[a['id'] as String];
         final bUsed = historyMap[b['id'] as String];
 
@@ -69,7 +81,7 @@ class GameQuestionsService {
       });
 
       final question =
-          GameQuestion.fromJson(questionsResponse.first as Map<String, dynamic>);
+          GameQuestion.fromJson(filteredQuestions.first as Map<String, dynamic>);
       debugPrint(
           'GameQuestionsService: Got question ${question.id} (${question.category}, difficulty: ${question.difficulty}) for user $userId');
       return question;
@@ -88,11 +100,15 @@ class GameQuestionsService {
         return;
       }
 
-      await _supabase.from(_historyTable).upsert({
-        'user_id': userId,
-        'question_id': questionId,
-        'last_used_at': DateTime.now().toIso8601String(),
-      });
+      // Use upsert with explicit conflict columns for composite primary key
+      await _supabase.from(_historyTable).upsert(
+        {
+          'user_id': userId,
+          'question_id': questionId,
+          'last_used_at': DateTime.now().toIso8601String(),
+        },
+        onConflict: 'user_id,question_id',
+      );
       debugPrint(
           'GameQuestionsService: Marked $questionId as used for user $userId');
     } catch (e) {

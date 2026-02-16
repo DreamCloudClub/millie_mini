@@ -20,6 +20,7 @@ import 'ai_services/edit_dream_cloud_page.dart';
 import 'ai_services/edit_custom_service_page.dart';
 import 'conversation/conversation_page.dart';
 import 'reminders/edit_alert_page.dart';
+import 'dashboard/edit_custom_quiz_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -85,6 +86,9 @@ class MillieMiniApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => GameSettingsProvider(storageService),
         ),
+        ChangeNotifierProvider(
+          create: (_) => CustomQuizProvider(),
+        ),
       ],
       child: MaterialApp(
         title: 'Millie Mini',
@@ -139,12 +143,17 @@ class _AppNavigatorState extends State<AppNavigator> {
       context.read<AIServiceProvider>().init(),
       context.read<ReminderProvider>().init(),
       context.read<GameSettingsProvider>().init(),
+      context.read<CustomQuizProvider>().loadQuizzes(),
     ]);
     
     // Wire up ReminderIntentHandler in VoiceProvider
     final voiceProvider = context.read<VoiceProvider>();
     final reminderProvider = context.read<ReminderProvider>();
     voiceProvider.setReminderProvider(reminderProvider);
+
+    // Wire up CustomQuizProvider for custom game quizzes
+    final customQuizProvider = context.read<CustomQuizProvider>();
+    voiceProvider.setCustomQuizProvider(customQuizProvider);
 
     // Initialize WeatherService if API key is configured in Supabase
     try {
@@ -281,6 +290,7 @@ enum MainRoute {
   customService,
   editAlert,
   createAlert,
+  editCustomQuiz,
 }
 
 class _MainNavigatorState extends State<MainNavigator> {
@@ -358,6 +368,10 @@ class _MainNavigatorState extends State<MainNavigator> {
           },
           child: GameSettingsEditPage(
             onSaved: _pop,
+            onEditCustomQuiz: (quizId) => _push(
+              MainRoute.editCustomQuiz,
+              params: {'quizId': quizId},
+            ),
           ),
         );
 
@@ -459,6 +473,19 @@ class _MainNavigatorState extends State<MainNavigator> {
           },
           child: EditAlertPage(
             reminderId: currentRoute.params?['reminderId'] as String?,
+            onBack: _pop,
+            onSaved: _pop,
+          ),
+        );
+
+      case MainRoute.editCustomQuiz:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: EditCustomQuizPage(
+            quizId: currentRoute.params?['quizId'] as String?,
             onBack: _pop,
             onSaved: _pop,
           ),

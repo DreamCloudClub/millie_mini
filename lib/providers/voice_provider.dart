@@ -12,6 +12,7 @@ import '../services/weather_service.dart';
 import '../game/game_controller.dart';
 import '../game/lesson_phase.dart';
 import 'reminder_provider.dart';
+import 'custom_quiz_provider.dart';
 
 class VoiceProvider extends ChangeNotifier {
   final _uuid = const Uuid();
@@ -64,6 +65,12 @@ class VoiceProvider extends ChangeNotifier {
     final weatherService = WeatherService(apiKey);
     _noteToolsHandler.setWeatherService(weatherService);
     debugPrint('VoiceProvider: WeatherService initialized');
+  }
+
+  /// Set CustomQuizProvider reference (for custom quiz game mode)
+  void setCustomQuizProvider(CustomQuizProvider provider) {
+    _gameController.setCustomQuizProvider(provider);
+    debugPrint('VoiceProvider: CustomQuizProvider set on GameController');
   }
   
   /// Get the note tools handler for AI note operations
@@ -174,6 +181,9 @@ class VoiceProvider extends ChangeNotifier {
       // Resume to paused state after lesson ends
       transitionTo(VoiceState.paused);
       notifyListeners();
+
+      // Check for any pending reminder alerts that were queued during the game
+      ReminderSchedulerService.getInstance().checkPendingAlertsOnPause();
     };
 
     // Forward controller notifications
@@ -182,11 +192,17 @@ class VoiceProvider extends ChangeNotifier {
     });
   }
 
-  /// Configure game settings (time limit and difficulty)
+  /// Configure game settings (time limit, difficulty, auto-record)
   void setGameSettings(GameSettings settings) {
     debugPrint('VoiceProvider.setGameSettings: $settings');
     _gameController.setTimeLimit(settings.timeLimit.seconds);
     _gameController.setDifficulty(settings.difficulty.dbValue);
+    _gameController.setAutoRecord(settings.autoRecord);
+  }
+
+  /// Start recording manually (for when auto-record is off)
+  Future<void> startGameRecording() async {
+    await _gameController.startRecording();
   }
 
   /// Select a lesson category (doesn't start the game yet)
@@ -250,9 +266,20 @@ class VoiceProvider extends ChangeNotifier {
   }
 
   /// End lesson mode immediately (for menu button)
-  void endLessonMode() {
-    if (_gameController.isActive) {
-      _gameController.exitMode();
+  /// Forces immediate exit - stops TTS, mic, and all listening
+  Future<void> endLessonMode() async {
+    // Always force stop audio first (even if game state is unexpected)
+    await _pipeline.forceStopAudio();
+
+    if (_gameController.isActive || _gameController.isSelected) {
+      // Force exit without goodbye TTS
+      _gameController.forceExit();
+
+      // Stop any audio playback and listening
+      await _pipeline.stopContinuousMode();
+
+      // Return to paused state
+      transitionTo(VoiceState.paused);
     }
   }
 
