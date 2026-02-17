@@ -75,7 +75,7 @@ class SpellingWordsService {
 
       final word = SpellingWord.fromJson(filteredWords.first);
       debugPrint(
-          'SpellingWordsService: Got word ${word.word} (difficulty: ${word.difficulty}) for user $userId');
+          'SpellingWordsService: Got word ${word.word} (difficulty: ${word.difficulty}, phonetic: ${word.lettersPhonetic}) for user $userId');
       return word;
     } catch (e) {
       debugPrint('SpellingWordsService: Error getting word: $e');

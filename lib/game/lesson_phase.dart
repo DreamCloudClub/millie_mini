@@ -38,7 +38,7 @@ extension LessonPhaseExtension on LessonPhase {
       case LessonPhase.intro:
         return 'Starting...';
       case LessonPhase.ask:
-        return 'Asking...';
+        return 'Talking...';
       case LessonPhase.listen:
         return 'Listening...';
       case LessonPhase.eval:
@@ -111,6 +111,15 @@ class LessonState {
 
   /// Whether current question is spelling mode
   bool get isSpellingMode => currentItem?.gradingType == GradingType.spelling;
+
+  /// Whether current question is letters mode
+  bool get isLettersMode => currentItem?.type == 'letters';
+
+  /// Whether current question is shapes mode
+  bool get isShapesMode => currentItem?.type == 'shapes';
+
+  /// Whether current question is animals mode (quiz or lesson)
+  bool get isAnimalsMode => currentItem?.type == 'animals' || currentItem?.type == 'animals:lesson' || category?.startsWith('animals') == true;
 
   /// Display text showing progress
   String get progressText {

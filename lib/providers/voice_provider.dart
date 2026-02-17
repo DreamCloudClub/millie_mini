@@ -9,6 +9,7 @@ import '../services/reminder_intent_handler.dart';
 import '../services/reminder_scheduler_service.dart';
 import '../services/note_tools_handler.dart';
 import '../services/weather_service.dart';
+import '../services/spelling_tts_player.dart';
 import '../game/game_controller.dart';
 import '../game/lesson_phase.dart';
 import 'reminder_provider.dart';
@@ -18,6 +19,7 @@ class VoiceProvider extends ChangeNotifier {
   final _uuid = const Uuid();
   late final VoicePipelineService _pipeline;
   late final GameController _gameController;
+  late final SpellingTtsPlayer _spellingTtsPlayer;
   ReminderIntentHandler? _reminderIntentHandler;
   ReminderProvider? _reminderProvider;
   final NoteToolsHandler _noteToolsHandler = NoteToolsHandler();
@@ -32,6 +34,7 @@ class VoiceProvider extends ChangeNotifier {
   VoiceProvider(StorageService storageService) {
     _pipeline = VoicePipelineService(storageService);
     _pipeline.noteToolsHandler = _noteToolsHandler;
+    _spellingTtsPlayer = SpellingTtsPlayer(_pipeline.openAIService);
     _gameController = GameController();
     _setupPipelineCallbacks();
     _setupGameController();
@@ -48,6 +51,13 @@ class VoiceProvider extends ChangeNotifier {
     _noteToolsHandler.onExitLessonMode = () async {
       debugPrint('VoiceProvider: onExitLessonMode callback');
       await exitLessonMode();
+    };
+
+    _noteToolsHandler.onRefreshSession = () async {
+      debugPrint('VoiceProvider: onRefreshSession callback - wiping context for game handoff');
+      if (_pendingAgentId != null) {
+        await refreshSession(_pendingAgentId!);
+      }
     };
   }
   
@@ -122,6 +132,35 @@ class VoiceProvider extends ChangeNotifier {
     _gameController.onPlayTTS = (text) async {
       final voice = _pendingVoice ?? 'alloy';
       await _pipeline.playTTSForLesson(text, voice);
+    };
+
+    // Wire audio file playback callback (for cached TTS)
+    _gameController.onPlayAudioFile = (filePath) async {
+      await _pipeline.playAudioFileForLesson(filePath);
+    };
+
+    // Update game controller with current voice
+    _gameController.setTTSVoice(_pendingVoice ?? 'alloy');
+
+    // Wire stop TTS callback (force stop audio playback)
+    _gameController.onStopTTS = () async {
+      await _pipeline.forceStopAudio();
+    };
+
+    // Wire spelling TTS callback (letter-by-letter with caching)
+    _gameController.onPlaySpellingTTS = (word) async {
+      final voice = _pendingVoice ?? 'alloy';
+      const model = 'tts-1'; // Could be made configurable
+      debugPrint('VoiceProvider: Playing spelling TTS for "$word"');
+      await _spellingTtsPlayer.playIncorrectSpelling(
+        word: word,
+        voice: voice,
+        model: model,
+      );
+      // Notify game controller that TTS is complete
+      final sessionId = _gameController.sessionId;
+      debugPrint('VoiceProvider: Spelling TTS complete, notifying game controller');
+      _gameController.onTTSFinished(sessionId: sessionId);
     };
 
     // Wire mic start callback
@@ -268,8 +307,9 @@ class VoiceProvider extends ChangeNotifier {
   /// End lesson mode immediately (for menu button)
   /// Forces immediate exit - stops TTS, mic, and all listening
   Future<void> endLessonMode() async {
-    // Always force stop audio first (even if game state is unexpected)
+    // Always force stop all audio first (even if game state is unexpected)
     await _pipeline.forceStopAudio();
+    await _spellingTtsPlayer.stop();
 
     if (_gameController.isActive || _gameController.isSelected) {
       // Force exit without goodbye TTS
@@ -395,6 +435,11 @@ class VoiceProvider extends ChangeNotifier {
     _pendingIntroMessage = introMessage;
     _pendingVoice = voice;
     _pendingUsername = username;
+
+    // Update game controller with voice for audio caching
+    if (voice != null) {
+      _gameController.setTTSVoice(voice);
+    }
     _pendingBio = bio;
     _pendingPersonalityPrompt = personalityPrompt;
     _pendingAiServiceId = aiServiceId;
@@ -672,19 +717,33 @@ class VoiceProvider extends ChangeNotifier {
     }
   }
   
-  /// End session completely
+  /// End session completely - shuts down all AI services and clears context
   Future<void> endSession() async {
-    // Stop everything and wait a moment to ensure cleanup
+    debugPrint('VoiceProvider: endSession - shutting down all AI services');
+
+    // Force stop all audio immediately
+    await _pipeline.forceStopAudio();
+    await _spellingTtsPlayer.stop();
+
+    // Stop continuous mode (recording, wake word, timers)
     await _pipeline.stopContinuousMode();
-    await Future.delayed(const Duration(milliseconds: 300)); // Ensure everything stops
-    
+
+    // Force exit game controller if active
+    if (_gameController.isActive || _gameController.isSelected) {
+      _gameController.forceExit();
+    }
+
+    // Wait for cleanup
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // Clear all state
     _conversation = null;
     _state = VoiceState.sleep;
     _isWakeWordActive = false;
     _lastTranscription = null;
     _lastResponse = null;
     _error = null;
-    
+
     // Clear pending session parameters
     _pendingAgentId = null;
     _pendingAgentName = null;
@@ -698,6 +757,7 @@ class VoiceProvider extends ChangeNotifier {
     _pendingUserEmail = null;
     _pendingSubscriptionStatus = null;
 
+    debugPrint('VoiceProvider: endSession complete - all services stopped');
     notifyListeners();
   }
   

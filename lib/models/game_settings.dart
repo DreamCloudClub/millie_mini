@@ -4,6 +4,9 @@ enum TimeLimit { none, ten, twenty, thirty }
 /// Difficulty levels for game questions
 enum GameDifficulty { easy, medium, hard }
 
+/// Display size options for accessibility
+enum DisplaySize { normal, large }
+
 extension TimeLimitExtension on TimeLimit {
   /// Display name for UI
   String get displayName {
@@ -86,16 +89,40 @@ extension GameDifficultyExtension on GameDifficulty {
   }
 }
 
+extension DisplaySizeExtension on DisplaySize {
+  /// Display name for UI
+  String get displayName {
+    switch (this) {
+      case DisplaySize.normal:
+        return 'Normal';
+      case DisplaySize.large:
+        return 'Large';
+    }
+  }
+
+  /// Create from string value
+  static DisplaySize fromString(String? value) {
+    switch (value) {
+      case 'large':
+        return DisplaySize.large;
+      default:
+        return DisplaySize.normal;
+    }
+  }
+}
+
 /// Game settings model for time limits and difficulty
 class GameSettings {
   final TimeLimit timeLimit;
   final GameDifficulty difficulty;
   final bool autoRecord; // When true, mic starts automatically after question
+  final DisplaySize displaySize; // Normal or large for accessibility
 
   const GameSettings({
     this.timeLimit = TimeLimit.none,
     this.difficulty = GameDifficulty.medium,
     this.autoRecord = true,
+    this.displaySize = DisplaySize.normal,
   });
 
   /// Default settings
@@ -106,6 +133,7 @@ class GameSettings {
       timeLimit: TimeLimitExtension.fromString(json['time_limit'] as String?),
       difficulty: GameDifficultyExtension.fromString(json['difficulty'] as String?),
       autoRecord: json['auto_record'] as bool? ?? true,
+      displaySize: DisplaySizeExtension.fromString(json['display_size'] as String?),
     );
   }
 
@@ -114,6 +142,7 @@ class GameSettings {
       'time_limit': timeLimit.name,
       'difficulty': difficulty.name,
       'auto_record': autoRecord,
+      'display_size': displaySize.name,
     };
   }
 
@@ -121,11 +150,13 @@ class GameSettings {
     TimeLimit? timeLimit,
     GameDifficulty? difficulty,
     bool? autoRecord,
+    DisplaySize? displaySize,
   }) {
     return GameSettings(
       timeLimit: timeLimit ?? this.timeLimit,
       difficulty: difficulty ?? this.difficulty,
       autoRecord: autoRecord ?? this.autoRecord,
+      displaySize: displaySize ?? this.displaySize,
     );
   }
 
@@ -135,14 +166,15 @@ class GameSettings {
     return other is GameSettings &&
         other.timeLimit == timeLimit &&
         other.difficulty == difficulty &&
-        other.autoRecord == autoRecord;
+        other.autoRecord == autoRecord &&
+        other.displaySize == displaySize;
   }
 
   @override
-  int get hashCode => timeLimit.hashCode ^ difficulty.hashCode ^ autoRecord.hashCode;
+  int get hashCode => timeLimit.hashCode ^ difficulty.hashCode ^ autoRecord.hashCode ^ displaySize.hashCode;
 
   @override
   String toString() {
-    return 'GameSettings(timeLimit: ${timeLimit.displayName}, difficulty: ${difficulty.displayName}, autoRecord: $autoRecord)';
+    return 'GameSettings(timeLimit: ${timeLimit.displayName}, difficulty: ${difficulty.displayName}, autoRecord: $autoRecord, displaySize: ${displaySize.displayName})';
   }
 }

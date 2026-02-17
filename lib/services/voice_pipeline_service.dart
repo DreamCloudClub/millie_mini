@@ -105,6 +105,9 @@ class VoicePipelineService {
   bool get isPlaying => _isPlaying;
   bool get isWakeWordListening => _isWakeWordListening;
 
+  /// Expose OpenAIService for spelling TTS player
+  OpenAIService get openAIService => _openaiService;
+
   Future<bool> checkMicrophonePermission() async {
     final status = await Permission.microphone.status;
     if (status.isGranted) {
@@ -937,7 +940,9 @@ class VoicePipelineService {
   Future<void> forceStopAudio() async {
     debugPrint('Force stopping audio playback');
     try {
+      // Stop and release to ensure immediate silence
       await _player.stop();
+      await _player.release();
       _isPlaying = false;
     } catch (e) {
       debugPrint('Error force stopping audio: $e');
@@ -948,21 +953,21 @@ class VoicePipelineService {
   /// Stop continuous mode completely - full context wipe
   Future<void> stopContinuousMode() async {
     debugPrint('Stopping continuous mode - full context wipe');
-    
+
     // Cancel all timers
     _amplitudeSubscription?.cancel();
     _silenceTimer?.cancel();
     _maxRecordingTimer?.cancel();
     stopWakeWordDetection();
-    
+
     // Stop audio playback
-    if (_isPlaying) {
-      try {
-        await _player.stop();
-        _isPlaying = false;
-      } catch (e) {
-        debugPrint('Error stopping audio: $e');
-      }
+    try {
+      await _player.stop();
+      await _player.release();
+      _isPlaying = false;
+    } catch (e) {
+      debugPrint('Error stopping audio: $e');
+      _isPlaying = false;
     }
     
     // Stop recording
@@ -1230,6 +1235,43 @@ class VoicePipelineService {
       }
     } catch (e) {
       debugPrint('Error playing lesson TTS: $e');
+      // Still fire callback on error so FSM doesn't get stuck
+      onTTSPlaybackComplete?.call();
+    }
+  }
+
+  /// Play an audio file for lesson mode (cached TTS, no generation)
+  Future<void> playAudioFileForLesson(String audioPath) async {
+    try {
+      debugPrint('Playing cached audio: $audioPath');
+      onStateChange?.call(VoiceState.speaking);
+
+      try { await _player.stop(); } catch (_) {}
+      _isPlaying = true;
+
+      final completer = Completer<void>();
+      StreamSubscription<void>? subscription;
+      subscription = _player.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted) {
+          completer.complete();
+          subscription?.cancel();
+        }
+      });
+
+      await _player.play(DeviceFileSource(audioPath));
+      await completer.future.timeout(const Duration(seconds: 120), onTimeout: () {
+        subscription?.cancel();
+      });
+      _isPlaying = false;
+      debugPrint('Cached audio playback complete');
+
+      // Wait a moment before callback
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Fire TTS completion callback for lesson mode FSM
+      onTTSPlaybackComplete?.call();
+    } catch (e) {
+      debugPrint('Error playing cached audio: $e');
       // Still fire callback on error so FSM doesn't get stuck
       onTTSPlaybackComplete?.call();
     }
@@ -1855,9 +1897,11 @@ Format note content nicely with line breaks, bullet points, and clear sections.
     try {
       // Play each chunk sequentially
       for (int i = 0; i < audioChunks.length; i++) {
+        // Stop if continuous mode was disabled (session ended)
+        if (!_isContinuousMode) break;
         // Allow force play to override pause check (for AI tool responses)
         if (_isPaused && !forcePlay) break; // Stop playing if paused (unless forced)
-        
+
         final audioPath = audioChunks[i];
         debugPrint('Playing audio chunk ${i + 1}/${audioChunks.length}');
         
@@ -1900,6 +1944,7 @@ Format note content nicely with line breaks, bullet points, and clear sections.
       noteToolsHandler?.checkAndExecutePendingNavigation();
 
       // Resume listening if auto-resume is enabled (normal conversation mode)
+      // Only resume if still in continuous mode (session not ended)
       if (autoResumeListening && _isContinuousMode && !_isPaused) {
         debugPrint('Audio finished - resuming listening in conversation mode');
         onStateChange?.call(VoiceState.listening);
@@ -1916,7 +1961,7 @@ Format note content nicely with line breaks, bullet points, and clear sections.
           subscriptionStatus: _currentSubscriptionStatus,
           getConversationHistory: _getConversationHistory,
         );
-      } else if (!_isPaused) {
+      } else if (_isContinuousMode && !_isPaused) {
         onStateChange?.call(VoiceState.listening);
       }
     }
@@ -2138,10 +2183,22 @@ Format note content nicely with line breaks, bullet points, and clear sections.
         onError?.call('Failed to play intro: $e');
       } finally {
         _isPlaying = false;
-        
+
+        // Don't auto-start listening if session was ended
+        if (!_isContinuousMode) {
+          debugPrint('Intro audio: Session ended, not starting listening');
+          return;
+        }
+
         // Wait a moment after audio finishes before starting listening
         await Future.delayed(const Duration(milliseconds: 500));
-        
+
+        // Double-check session wasn't ended during delay
+        if (!_isContinuousMode) {
+          debugPrint('Intro audio: Session ended during delay, not starting listening');
+          return;
+        }
+
         // Auto-start listening if enabled
         if (autoStartListening && !_isPaused) {
           await startListening(
@@ -2166,13 +2223,20 @@ Format note content nicely with line breaks, bullet points, and clear sections.
       debugPrint('Error playing intro message: $e');
       debugPrint('Stack trace: $stackTrace');
       onError?.call('Failed to play intro: $e');
-      
+
+      // Don't auto-start listening if session was ended
+      if (!_isContinuousMode) {
+        debugPrint('Intro audio error: Session ended, not starting listening');
+        return;
+      }
+
       // Return to listening state even if intro fails
       onStateChange?.call(VoiceState.listening);
-      
+
       // Still try to start listening if auto-start is enabled
-      if (autoStartListening) {
+      if (autoStartListening && _isContinuousMode) {
         await Future.delayed(const Duration(milliseconds: 300));
+        if (!_isContinuousMode) return; // Check again after delay
         await startListening(
           continuousMode: true,
           agentId: agentId,

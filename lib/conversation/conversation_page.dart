@@ -336,6 +336,9 @@ class _ConversationPageState extends State<ConversationPage> {
       overlays: [SystemUiOverlay.top],
     );
 
+    // Notify scheduler we're leaving the face page
+    ReminderSchedulerService.getInstance().setOnFacePage(false);
+
     final voiceProvider = context.read<VoiceProvider>();
     await voiceProvider.endLessonMode(); // Reset game state
     await voiceProvider.endSession();

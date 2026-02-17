@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +6,9 @@ import '../providers/providers.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
 import '../face/control_bar.dart';
+import '../services/shapes_service.dart';
+import '../services/animals_service.dart';
+import '../services/image_cache_service.dart';
 import 'lesson_phase.dart';
 
 /// Game display page for riddles, jokes, and interactive games
@@ -40,8 +44,14 @@ class GamePageContent extends StatefulWidget {
 }
 
 class _GamePageContentState extends State<GamePageContent> {
-  /// Whether we're showing the math subcategory menu
+  /// Top-level category menus
+  bool _showBrainGamesMenu = false;
+  bool _showLearningMenu = false;
+
+  /// Sub-category menus (within Learning)
   bool _showMathMenu = false;
+  bool _showLettersMenu = false;
+  bool _showAnimalsMenu = false;
 
   /// Track if game was running in previous frame (to detect game end)
   bool _wasGameRunning = false;
@@ -74,11 +84,19 @@ class _GamePageContentState extends State<GamePageContent> {
           builder: (context, voiceProvider, _) {
             final lessonState = voiceProvider.lessonState;
 
-            // Reset math submenu when returning from a game
+            // Reset submenus when returning from a game
             final isGameRunning = lessonState.isGameRunning;
-            if (_wasGameRunning && !isGameRunning && _showMathMenu) {
+            final anyMenuOpen = _showBrainGamesMenu || _showLearningMenu ||
+                _showMathMenu || _showLettersMenu || _showAnimalsMenu;
+            if (_wasGameRunning && !isGameRunning && anyMenuOpen) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) setState(() => _showMathMenu = false);
+                if (mounted) setState(() {
+                  _showBrainGamesMenu = false;
+                  _showLearningMenu = false;
+                  _showMathMenu = false;
+                  _showLettersMenu = false;
+                  _showAnimalsMenu = false;
+                });
               });
             }
             _wasGameRunning = isGameRunning;
@@ -90,16 +108,43 @@ class _GamePageContentState extends State<GamePageContent> {
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Row(
                     children: [
-                      // Green back button (left) - returns to main menu or exits
+                      // Green back button (left) - exits game or returns to parent menu
                       GestureDetector(
-                        onTap: () {
-                          if (_showMathMenu) {
-                            // Go back to main games menu
-                            setState(() => _showMathMenu = false);
-                          } else {
-                            // Exit games entirely
-                            voiceProvider.endLessonMode();
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (_) async {
+                          // If game is running, end the lesson and go to main menu
+                          if (lessonState.isGameRunning) {
+                            await voiceProvider.endLessonMode();
+                            setState(() {
+                              _showBrainGamesMenu = false;
+                              _showLearningMenu = false;
+                              _showMathMenu = false;
+                              _showLettersMenu = false;
+                              _showAnimalsMenu = false;
+                            });
+                            return;
                           }
+
+                          if (_showMathMenu || _showLettersMenu) {
+                            // Go back to Learning menu
+                            setState(() {
+                              _showMathMenu = false;
+                              _showLettersMenu = false;
+                            });
+                          } else if (_showAnimalsMenu) {
+                            // Animals goes directly to main menu
+                            setState(() {
+                              _showAnimalsMenu = false;
+                              _showLearningMenu = false;
+                            });
+                          } else if (_showBrainGamesMenu || _showLearningMenu) {
+                            // Go back to main games menu
+                            setState(() {
+                              _showBrainGamesMenu = false;
+                              _showLearningMenu = false;
+                            });
+                          }
+                          // On main menu: do nothing (orange button exits to face)
                         },
                         child: Container(
                           width: 44,
@@ -132,7 +177,8 @@ class _GamePageContentState extends State<GamePageContent> {
 
                       // Orange back button (right)
                       GestureDetector(
-                        onTap: widget.onNavigateToFace,
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (_) => widget.onNavigateToFace(),
                         child: Container(
                           width: 44,
                           height: 44,
@@ -281,17 +327,88 @@ class _GamePageContentState extends State<GamePageContent> {
     final selectedCategory = lessonState.isSelected ? lessonState.category : null;
     final customQuizzes = context.watch<CustomQuizProvider>().quizzes;
 
-    // Show math submenu if in math selection mode
-    if (_showMathMenu) {
-      return _buildMathSubMenu(context, voiceProvider, selectedCategory);
+    // Show Brain Games submenu
+    if (_showBrainGamesMenu) {
+      return _buildBrainGamesSubMenu(context, voiceProvider, selectedCategory);
     }
 
+    // Show Learning submenu
+    if (_showLearningMenu) {
+      // Check for nested submenus within Learning
+      if (_showMathMenu) {
+        return _buildMathSubMenu(context, voiceProvider, selectedCategory);
+      }
+      if (_showLettersMenu) {
+        return _buildLettersSubMenu(context, voiceProvider, selectedCategory);
+      }
+      if (_showAnimalsMenu) {
+        return _buildAnimalsSubMenu(context, voiceProvider, selectedCategory);
+      }
+      return _buildLearningSubMenu(context, voiceProvider, selectedCategory);
+    }
+
+    // Main menu: Brain Games, Learning, Random, Custom Quizzes
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.md),
       child: SingleChildScrollView(
         child: Column(
           children: [
-            // Game options - select category, then press Start
+            // Fun Games - opens submenu
+            _GameOptionButton(
+              icon: Icons.psychology,
+              title: 'Fun Games',
+              subtitle: 'Riddles, jokes, trivia & more',
+              isSelected: false,
+              onTap: () => setState(() => _showBrainGamesMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            // Learning - opens submenu
+            _GameOptionButton(
+              icon: Icons.school,
+              title: 'Learning',
+              subtitle: 'Letters, shapes, spelling & more',
+              isSelected: false,
+              onTap: () => setState(() => _showLearningMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            // Random - direct selection
+            _GameOptionButton(
+              icon: Icons.shuffle,
+              title: 'Random',
+              subtitle: 'Mix it up',
+              isSelected: selectedCategory == 'random',
+              onTap: () => voiceProvider.selectLessonCategory('random'),
+            ),
+
+            // Custom quizzes
+            ...customQuizzes.map((quiz) => Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.md),
+              child: _GameOptionButton(
+                icon: Icons.auto_awesome,
+                title: quiz.name,
+                subtitle: quiz.categoriesDisplay,
+                isSelected: selectedCategory == 'custom:${quiz.id}',
+                onTap: () => voiceProvider.selectLessonCategory('custom:${quiz.id}'),
+              ),
+            )),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBrainGamesSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
             _GameOptionButton(
               icon: Icons.psychology,
               title: 'Riddles',
@@ -323,6 +440,47 @@ class _GamePageContentState extends State<GamePageContent> {
             const SizedBox(height: AppSpacing.md),
 
             _GameOptionButton(
+              icon: Icons.check_circle_outline,
+              title: 'True or False',
+              subtitle: 'Fact or fiction?',
+              isSelected: selectedCategory == 'truefalse',
+              onTap: () => voiceProvider.selectLessonCategory('truefalse'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLearningSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _GameOptionButton(
+              icon: Icons.abc,
+              title: 'Letters',
+              subtitle: 'Learn the alphabet',
+              isSelected: selectedCategory?.startsWith('letters') ?? false,
+              onTap: () => setState(() => _showLettersMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
+              icon: Icons.category,
+              title: 'Shapes',
+              subtitle: 'Learn shapes',
+              isSelected: selectedCategory == 'shapes',
+              onTap: () => voiceProvider.selectLessonCategory('shapes'),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
               icon: Icons.spellcheck,
               title: 'Spelling',
               subtitle: 'Spell words out loud',
@@ -343,24 +501,12 @@ class _GamePageContentState extends State<GamePageContent> {
             const SizedBox(height: AppSpacing.md),
 
             _GameOptionButton(
-              icon: Icons.shuffle,
-              title: 'Random',
-              subtitle: 'Mix it up',
-              isSelected: selectedCategory == 'random',
-              onTap: () => voiceProvider.selectLessonCategory('random'),
+              icon: Icons.pets,
+              title: 'Animals',
+              subtitle: 'Learn about animals',
+              isSelected: selectedCategory?.startsWith('animals') ?? false,
+              onTap: () => setState(() => _showAnimalsMenu = true),
             ),
-
-            // Custom quizzes
-            ...customQuizzes.map((quiz) => Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.md),
-              child: _GameOptionButton(
-                icon: Icons.auto_awesome,
-                title: quiz.name,
-                subtitle: quiz.categoriesDisplay,
-                isSelected: selectedCategory == 'custom:${quiz.id}',
-                onTap: () => voiceProvider.selectLessonCategory('custom:${quiz.id}'),
-              ),
-            )),
 
             const SizedBox(height: AppSpacing.lg),
           ],
@@ -430,6 +576,80 @@ class _GamePageContentState extends State<GamePageContent> {
     );
   }
 
+  Widget _buildLettersSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _GameOptionButton(
+              icon: Icons.text_fields,
+              title: 'Uppercase A-Z',
+              subtitle: 'Learn uppercase letters in order',
+              isSelected: selectedCategory == 'letters:uppercase',
+              onTap: () => voiceProvider.selectLessonCategory('letters:uppercase'),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
+              icon: Icons.text_format,
+              title: 'Lowercase a-z',
+              subtitle: 'Learn lowercase letters in order',
+              isSelected: selectedCategory == 'letters:lowercase',
+              onTap: () => voiceProvider.selectLessonCategory('letters:lowercase'),
+            ),
+
+            const SizedBox(height: AppSpacing.md),
+
+            _GameOptionButton(
+              icon: Icons.shuffle,
+              title: 'Random',
+              subtitle: 'Mix of uppercase and lowercase',
+              isSelected: selectedCategory == 'letters:random',
+              onTap: () => voiceProvider.selectLessonCategory('letters:random'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnimalsSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _AnimalOptionCard(
+              icon: Icons.school,
+              title: 'Lessons',
+              subtitle: 'Learn about animals',
+              description: 'See pictures and hear fun facts about mammals, birds, fish, reptiles, and more',
+              isSelected: selectedCategory == 'animals:lessons',
+              onTap: () => voiceProvider.selectLessonCategory('animals:lessons'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _AnimalOptionCard(
+              icon: Icons.quiz,
+              title: 'Quiz',
+              subtitle: 'Test your knowledge',
+              description: 'See an animal and try to name it - how many can you get right?',
+              isSelected: selectedCategory == 'animals:quiz',
+              onTap: () => voiceProvider.selectLessonCategory('animals:quiz'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLessonDisplay(BuildContext context, LessonState lessonState) {
     final voiceProvider = context.read<VoiceProvider>();
     final remainingSeconds = voiceProvider.gameController.remainingSeconds;
@@ -440,9 +660,20 @@ class _GamePageContentState extends State<GamePageContent> {
     }
 
     // For spelling: show just the word (from item.displayText)
+    // For letters: show just the letter in large font
+    // For shapes: show the shape icon with hint
+    // For animals: show the animal image with description
     // For others: show the full question
     if (lessonState.isSpellingMode) {
       return _buildSpellingDisplay(context, lessonState, remainingSeconds);
+    } else if (lessonState.isLettersMode) {
+      return _buildLettersDisplay(context, lessonState, remainingSeconds);
+    } else if (lessonState.isShapesMode) {
+      return _buildShapesDisplay(context, lessonState, remainingSeconds);
+    } else if (lessonState.category == 'animals:lessons') {
+      return _buildAnimalsLessonDisplay(context, lessonState);
+    } else if (lessonState.isAnimalsMode) {
+      return _buildAnimalsQuizDisplay(context, lessonState, remainingSeconds);
     } else {
       return _buildDefaultDisplay(context, lessonState, remainingSeconds);
     }
@@ -469,8 +700,19 @@ class _GamePageContentState extends State<GamePageContent> {
         return ("Let's have some laughs!", "I'll tell you a joke.");
       case 'trivia':
         return ("Let's test your knowledge!", "I'll ask you some trivia questions.");
+      case 'truefalse':
+      case 'true false':
+      case 'true or false':
+        return ("True or False!", "I'll make a statement and you tell me if it's true or false.");
       case 'spelling':
         return ("Let's practice spelling!", "I'll show you a word and you spell it out loud, letter by letter.");
+      case 'letters':
+      case 'letters:random':
+        return ("Let's learn letters!", "I'll show you a letter and you tell me what it is.");
+      case 'letters:uppercase':
+        return ("Uppercase Letters!", "I'll show you each letter from A to Z.");
+      case 'letters:lowercase':
+        return ("Lowercase Letters!", "I'll show you each letter from a to z.");
       case 'math':
       case 'math:random':
         return ("Let's practice math!", "I'll give you some problems to solve.");
@@ -482,6 +724,13 @@ class _GamePageContentState extends State<GamePageContent> {
         return ("Let's practice multiplication!", "I'll give you some problems to solve.");
       case 'math:division':
         return ("Let's practice division!", "I'll give you some problems to solve.");
+      case 'shapes':
+        return ("Let's learn shapes!", "I'll show you a shape and give you a hint.");
+      case 'animals':
+      case 'animals:quiz':
+        return ("Let's learn about animals!", "I'll show you an animal and describe it.");
+      case 'animals:lessons':
+        return ("Let's learn about animals!", "I'll show you animals and tell you fun facts.");
       default:
         return ("Let's play!", "I'll ask you some questions.");
     }
@@ -558,10 +807,15 @@ class _GamePageContentState extends State<GamePageContent> {
   Widget _buildSpellingDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
     final word = lessonState.displayQuestion;
 
+    // Get display size setting (large = 50% bigger than normal)
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    final wordFontSize = isLarge ? 144.0 : 96.0;
+    final progressFontSize = isLarge ? 33.0 : 22.0;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: AppSpacing.lg,
-        horizontal: AppSpacing.lg,
+      padding: EdgeInsets.symmetric(
+        vertical: isLarge ? AppSpacing.xl : AppSpacing.lg,
+        horizontal: isLarge ? AppSpacing.xl : AppSpacing.lg,
       ),
       child: Column(
         children: [
@@ -573,7 +827,7 @@ class _GamePageContentState extends State<GamePageContent> {
                 lessonState.progressText,
                 style: TextStyle(
                   fontFamily: AppTextStyles.fontFamily,
-                  fontSize: 14,
+                  fontSize: progressFontSize,
                   color: Colors.white.withOpacity(0.6),
                 ),
               ),
@@ -585,12 +839,12 @@ class _GamePageContentState extends State<GamePageContent> {
           Text(
             word.isEmpty ? '...' : word.toLowerCase(),
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: AppTextStyles.fontFamily,
-              fontSize: 72,
+              fontSize: wordFontSize,
               fontWeight: FontWeight.w500,
               color: Colors.white,
-              letterSpacing: 3,
+              letterSpacing: isLarge ? 5 : 3,
             ),
           ),
 
@@ -605,17 +859,19 @@ class _GamePageContentState extends State<GamePageContent> {
     );
   }
 
-  Widget _buildDefaultDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
-    final questionText = lessonState.displayQuestion;
-    final isMath = lessonState.currentItem?.type == 'math';
+  Widget _buildLettersDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
+    final letter = lessonState.displayQuestion;
 
-    // Check if this is a multi-digit math problem that should be stacked
-    final shouldStack = isMath && _shouldStackMathProblem(questionText);
+    // Get display size setting (letter size is fixed, prompt adjusts)
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    const letterFontSize = 180.0; // Fixed size
+    final promptFontSize = isLarge ? 48.0 : 32.0;
+    final progressFontSize = isLarge ? 33.0 : 22.0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: AppSpacing.lg,
-        horizontal: AppSpacing.lg,
+      padding: EdgeInsets.symmetric(
+        vertical: isLarge ? AppSpacing.xl : AppSpacing.lg,
+        horizontal: isLarge ? AppSpacing.xl : AppSpacing.lg,
       ),
       child: Column(
         children: [
@@ -627,7 +883,332 @@ class _GamePageContentState extends State<GamePageContent> {
                 lessonState.progressText,
                 style: TextStyle(
                   fontFamily: AppTextStyles.fontFamily,
-                  fontSize: 14,
+                  fontSize: progressFontSize,
+                  color: Colors.white.withOpacity(0.6),
+                ),
+              ),
+            ),
+
+          const Spacer(flex: 1),
+
+          // Prompt text
+          Text(
+            'What letter is this?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: promptFontSize,
+              color: Colors.white.withOpacity(0.7),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // LARGE LETTER DISPLAY
+          Text(
+            letter.isEmpty ? '...' : letter,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: letterFontSize,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+
+          const Spacer(flex: 1),
+
+          // Timer during LISTEN phase, Answer during FEEDBACK phase
+          _buildTimerOrAnswer(context, lessonState),
+
+          const Spacer(flex: 1),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShapesDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
+    final hint = lessonState.displayQuestion; // "This shape has 3 sides. What is it?"
+    final shapeId = lessonState.currentItem?.id ?? '';
+    final assetPath = ShapesService.getAssetPath(shapeId) ?? 'assets/shapes/circle.png';
+
+    // Shape size is fixed, but hint text respects display size setting (large = 50% bigger)
+    const shapeSize = 260.0;
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    final hintFontSize = isLarge ? 48.0 : 32.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        vertical: AppSpacing.xl,
+        horizontal: AppSpacing.xl,
+      ),
+      child: Column(
+        children: [
+          // Progress indicator
+          if (lessonState.questionCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: Text(
+                lessonState.progressText,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: isLarge ? 33.0 : 22.0,
+                  color: Colors.white.withOpacity(0.6),
+                ),
+              ),
+            ),
+
+          const Spacer(flex: 1),
+
+          // SHAPE IMAGE
+          Image.asset(
+            assetPath,
+            width: shapeSize,
+            height: shapeSize,
+            fit: BoxFit.contain,
+          ),
+
+          const SizedBox(height: AppSpacing.xl),
+
+          // Hint text: "This shape has 3 sides. What is it?"
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Text(
+              hint,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: AppTextStyles.fontFamily,
+                fontSize: hintFontSize,
+                color: Colors.white.withOpacity(0.9),
+                height: 1.3,
+              ),
+            ),
+          ),
+
+          const Spacer(flex: 1),
+
+          // Timer during LISTEN phase, Answer during FEEDBACK phase
+          _buildTimerOrAnswer(context, lessonState),
+
+          const Spacer(flex: 1),
+        ],
+      ),
+    );
+  }
+
+  /// Build animal image widget - uses cached local file if available, otherwise network
+  Widget _buildAnimalImage(String? imageUrl) {
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return Container(
+        height: 200,
+        color: Colors.white.withOpacity(0.1),
+        child: Center(
+          child: Icon(
+            Icons.pets,
+            size: 80,
+            color: Colors.white.withOpacity(0.3),
+          ),
+        ),
+      );
+    }
+
+    // Check for cached local file
+    final localPath = ImageCacheService.getLocalPath(imageUrl);
+    if (localPath != null) {
+      return Image.file(
+        File(localPath),
+        width: double.infinity,
+        fit: BoxFit.fitWidth,
+        errorBuilder: (context, error, stackTrace) {
+          // Fall back to network if local file fails
+          return Image.network(
+            imageUrl,
+            width: double.infinity,
+            fit: BoxFit.fitWidth,
+            errorBuilder: (context, error, stackTrace) {
+              return Container(
+                height: 200,
+                color: Colors.white.withOpacity(0.1),
+                child: Center(
+                  child: Icon(
+                    Icons.pets,
+                    size: 80,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    }
+
+    // No cache - use network
+    return Image.network(
+      imageUrl,
+      width: double.infinity,
+      fit: BoxFit.fitWidth,
+      errorBuilder: (context, error, stackTrace) {
+        return Container(
+          height: 200,
+          color: Colors.white.withOpacity(0.1),
+          child: Center(
+            child: Icon(
+              Icons.pets,
+              size: 80,
+              color: Colors.white.withOpacity(0.3),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Animals Lesson display - image at top, name, then description
+  Widget _buildAnimalsLessonDisplay(BuildContext context, LessonState lessonState) {
+    final description = lessonState.displayQuestion;
+    final animalName = lessonState.displayAnswer;
+    final imageUrl = lessonState.currentItem?.imageUrl;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Image - 80% width at top, centered
+          Center(
+            child: FractionallySizedBox(
+              widthFactor: 0.8,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildAnimalImage(imageUrl),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Name under image
+          Text(
+            animalName,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.md),
+
+          // Description under name
+          Text(
+            description,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 20,
+              color: Colors.white.withOpacity(0.9),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Animals Quiz display - matches lesson style for image
+  Widget _buildAnimalsQuizDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
+    final imageUrl = lessonState.currentItem?.imageUrl;
+
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    final promptFontSize = isLarge ? 36.0 : 28.0;
+    final progressFontSize = isLarge ? 22.0 : 16.0;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Progress indicator
+          if (lessonState.questionCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: Text(
+                lessonState.progressText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: progressFontSize,
+                  color: Colors.white.withOpacity(0.6),
+                ),
+              ),
+            ),
+
+          // Image - 80% width, centered (matches lesson style)
+          Center(
+            child: FractionallySizedBox(
+              widthFactor: 0.8,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildAnimalImage(imageUrl),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Simple prompt - just ask "What animal is this?"
+          Text(
+            'What animal is this?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: promptFontSize,
+              fontWeight: FontWeight.w500,
+              color: Colors.white.withOpacity(0.9),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Timer during LISTEN phase, Answer during FEEDBACK phase
+          _buildTimerOrAnswer(context, lessonState),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDefaultDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
+    final questionText = lessonState.displayQuestion;
+    final isMath = lessonState.currentItem?.type == 'math';
+
+    // Get display size setting (large = 50% bigger than normal)
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    final mathFontSize = isLarge ? 126.0 : 84.0;
+    final questionFontSize = isLarge ? 63.0 : 42.0;
+    final progressFontSize = isLarge ? 33.0 : 22.0;
+
+    // Check if this is a multi-digit math problem that should be stacked
+    final shouldStack = isMath && _shouldStackMathProblem(questionText);
+
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        vertical: isLarge ? AppSpacing.xl : AppSpacing.lg,
+        horizontal: isLarge ? AppSpacing.xl : AppSpacing.lg,
+      ),
+      child: Column(
+        children: [
+          // Progress indicator
+          if (lessonState.questionCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: Text(
+                lessonState.progressText,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: progressFontSize,
                   color: Colors.white.withOpacity(0.6),
                 ),
               ),
@@ -637,14 +1218,14 @@ class _GamePageContentState extends State<GamePageContent> {
 
           // Main question - stacked for multi-digit math, horizontal otherwise
           if (shouldStack)
-            _buildStackedMathDisplay(questionText)
+            _buildStackedMathDisplay(questionText, isLarge: isLarge)
           else
             Text(
               questionText,
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: AppTextStyles.fontFamily,
-                fontSize: isMath ? 64 : 28,
+                fontSize: isMath ? mathFontSize : questionFontSize,
                 fontWeight: isMath ? FontWeight.w600 : FontWeight.w400,
                 color: Colors.white,
                 height: 1.3,
@@ -691,15 +1272,17 @@ class _GamePageContentState extends State<GamePageContent> {
   ///     23
   ///   ×  4
   ///   ────
-  Widget _buildStackedMathDisplay(String question) {
+  Widget _buildStackedMathDisplay(String question, {bool isLarge = false}) {
     final parts = _parseMathProblem(question);
+    final fallbackFontSize = isLarge ? 126.0 : 84.0;
+
     if (parts == null) {
       // Fallback to horizontal display
       return Text(
         question,
-        style: const TextStyle(
+        style: TextStyle(
           fontFamily: AppTextStyles.fontFamily,
-          fontSize: 64,
+          fontSize: fallbackFontSize,
           fontWeight: FontWeight.w600,
           color: Colors.white,
           letterSpacing: 2,
@@ -709,23 +1292,27 @@ class _GamePageContentState extends State<GamePageContent> {
 
     final (num1, operator, num2) = parts;
 
+    // Sizes based on display setting (large = 50% bigger than normal)
+    final numberFontSize = isLarge ? 114.0 : 76.0;
+    final operatorFontSize = isLarge ? 96.0 : 64.0;
+    final digitWidth = isLarge ? 72.0 : 48.0;
+
     // Calculate the width needed based on the longer number
     final maxDigits = num1.length > num2.length ? num1.length : num2.length;
-    // Each digit is roughly 36px wide at fontSize 56, plus some padding for operator
-    final lineWidth = (maxDigits + 2) * 36.0;
+    final lineWidth = (maxDigits + 2) * digitWidth;
 
-    const numberStyle = TextStyle(
+    final numberStyle = TextStyle(
       fontFamily: AppTextStyles.fontFamily,
-      fontSize: 56,
+      fontSize: numberFontSize,
       fontWeight: FontWeight.w600,
       color: Colors.white,
       letterSpacing: 4,
       height: 1.2,
     );
 
-    const operatorStyle = TextStyle(
+    final operatorStyle = TextStyle(
       fontFamily: AppTextStyles.fontFamily,
-      fontSize: 48,
+      fontSize: operatorFontSize,
       fontWeight: FontWeight.w500,
       color: Colors.white,
     );
@@ -745,17 +1332,17 @@ class _GamePageContentState extends State<GamePageContent> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(operator, style: operatorStyle),
-            const SizedBox(width: 12),
+            SizedBox(width: isLarge ? 16 : 12),
             Text(num2, style: numberStyle),
           ],
         ),
 
-        const SizedBox(height: 8),
+        SizedBox(height: isLarge ? 12 : 8),
 
         // Horizontal line
         Container(
           width: lineWidth,
-          height: 4,
+          height: isLarge ? 6 : 4,
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(2),
@@ -794,6 +1381,40 @@ class _GamePageContentState extends State<GamePageContent> {
     final answerText = lessonState.displayAnswer;
     final isCorrect = lessonState.isCorrect == true;
 
+    // For letters mode, just show "Correct!" or "Incorrect" without the answer
+    if (lessonState.isLettersMode) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: AppSpacing.md),
+        padding: const EdgeInsets.symmetric(
+          vertical: AppSpacing.lg,
+          horizontal: AppSpacing.lg,
+        ),
+        decoration: BoxDecoration(
+          color: isCorrect
+              ? Colors.green.withOpacity(0.1)
+              : Colors.orange.withOpacity(0.1),
+          border: Border.all(
+            color: isCorrect
+                ? Colors.green.withOpacity(0.5)
+                : Colors.orange.withOpacity(0.5),
+            width: 2,
+          ),
+          borderRadius: BorderRadius.circular(AppBorderRadius.large),
+        ),
+        child: Text(
+          isCorrect ? 'Correct!' : 'Incorrect',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: AppTextStyles.fontFamily,
+            fontSize: 28,
+            fontWeight: FontWeight.w600,
+            color: isCorrect ? Colors.green : Colors.orange,
+          ),
+        ),
+      );
+    }
+
     // For spelling mode, space out the letters: "apple" -> "a  p  p  l  e"
     final displayText = lessonState.isSpellingMode
         ? answerText.toLowerCase().split('').join('  ')
@@ -801,9 +1422,9 @@ class _GamePageContentState extends State<GamePageContent> {
 
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(top: AppSpacing.lg),
+      margin: const EdgeInsets.only(top: AppSpacing.md),
       padding: const EdgeInsets.symmetric(
-        vertical: AppSpacing.xl,
+        vertical: AppSpacing.lg,
         horizontal: AppSpacing.lg,
       ),
       decoration: BoxDecoration(
@@ -818,28 +1439,16 @@ class _GamePageContentState extends State<GamePageContent> {
         ),
         borderRadius: BorderRadius.circular(AppBorderRadius.large),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Correct/incorrect indicator
-          Icon(
-            isCorrect ? Icons.check_circle : Icons.info_outline,
-            color: isCorrect ? Colors.green : Colors.orange,
-            size: 48,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            displayText,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontFamily: AppTextStyles.fontFamily,
-              fontSize: lessonState.isSpellingMode ? 40 : 32,
-              fontWeight: FontWeight.w600,
-              letterSpacing: lessonState.isSpellingMode ? 4 : 0,
-              color: isCorrect ? Colors.green : Colors.orange,
-            ),
-          ),
-        ],
+      child: Text(
+        displayText,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontFamily: AppTextStyles.fontFamily,
+          fontSize: lessonState.isSpellingMode ? 36 : 28,
+          fontWeight: FontWeight.w600,
+          letterSpacing: lessonState.isSpellingMode ? 4 : 0,
+          color: isCorrect ? Colors.green : Colors.orange,
+        ),
       ),
     );
   }
@@ -920,6 +1529,106 @@ class _GameOptionButton extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Taller card for Animals submenu with description
+class _AnimalOptionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String description;
+  final VoidCallback onTap;
+  final bool isSelected;
+
+  const _AnimalOptionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.description,
+    required this.onTap,
+    this.isSelected = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(AppBorderRadius.large),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.dreamCloudBlue
+                : Colors.white.withOpacity(0.2),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.dreamCloudBlue.withOpacity(0.2)
+                        : Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: isSelected ? AppColors.dreamCloudBlue : Colors.white,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.lg),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontFamily: AppTextStyles.fontFamily,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: isSelected ? AppColors.dreamCloudBlue : Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontFamily: AppTextStyles.fontFamily,
+                          fontSize: 18,
+                          color: Colors.white.withOpacity(0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              description,
+              style: TextStyle(
+                fontFamily: AppTextStyles.fontFamily,
+                fontSize: 15,
+                color: Colors.white.withOpacity(0.5),
+                height: 1.4,
               ),
             ),
           ],

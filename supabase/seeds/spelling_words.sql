@@ -1,4 +1,6 @@
 -- Spelling words seed data (into spelling_words table)
+-- letters_phonetic is optional, reserved for future phonics mode
+
 -- Easy (Pre-K): 3-4 letter common words (50 words)
 INSERT INTO spelling_words (word, difficulty) VALUES
 ('cat', 'easy'),

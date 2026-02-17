@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'services/services.dart';
+import 'services/image_cache_service.dart';
 import 'providers/providers.dart';
 import 'utils/constants.dart';
 import 'splash_page.dart';
@@ -89,6 +90,9 @@ class MillieMiniApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => CustomQuizProvider(),
         ),
+        ChangeNotifierProvider(
+          create: (_) => FaceImageProvider(),
+        ),
       ],
       child: MaterialApp(
         title: 'Millie Mini',
@@ -144,6 +148,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       context.read<ReminderProvider>().init(),
       context.read<GameSettingsProvider>().init(),
       context.read<CustomQuizProvider>().loadQuizzes(),
+      context.read<FaceImageProvider>().init(),
     ]);
     
     // Wire up ReminderIntentHandler in VoiceProvider
@@ -185,16 +190,20 @@ class _AppNavigatorState extends State<AppNavigator> {
     final authProvider = context.read<AuthProvider>();
     if (authProvider.isLoggedIn) {
       final scheduler = ReminderSchedulerService.getInstance();
-      
+
       // Set VoiceProvider reference for face mode alerts
       scheduler.setVoiceProvider(voiceProvider);
       // Set ReminderProvider reference for refreshing lists after alerts trigger
       scheduler.setReminderProvider(reminderProvider);
-      
+
       // Start scheduler
       scheduler.start();
-      
+
       debugPrint('Reminder scheduler started');
+
+      // Sync animal and face images in background (don't await - non-blocking)
+      ImageCacheService.syncAnimalImages();
+      ImageCacheService.syncFaceImages();
     }
     
     if (mounted) {

@@ -65,4 +65,15 @@ class GameSettingsProvider extends ChangeNotifier {
   Future<void> setDifficulty(GameDifficulty difficulty) async {
     await updateSettings(_settings.copyWith(difficulty: difficulty));
   }
+
+  /// Current display size setting
+  DisplaySize get displaySize => _settings.displaySize;
+
+  /// Whether large display mode is enabled
+  bool get isLargeDisplay => _settings.displaySize == DisplaySize.large;
+
+  /// Update just the display size
+  Future<void> setDisplaySize(DisplaySize displaySize) async {
+    await updateSettings(_settings.copyWith(displaySize: displaySize));
+  }
 }

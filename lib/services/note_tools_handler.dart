@@ -126,6 +126,9 @@ class NoteToolsHandler {
   /// Callback to exit lesson mode
   Future<void> Function()? onExitLessonMode;
 
+  /// Callback to refresh/wipe session (clear conversation context)
+  Future<void> Function()? onRefreshSession;
+
   /// Set the active note (for when UI updates it externally)
   /// Does NOT trigger onActiveNoteChanged to avoid infinite loops
   void setActiveNote(Note? note) {
@@ -344,17 +347,17 @@ class NoteToolsHandler {
       'type': 'function',
       'function': {
         'name': 'start_lesson_mode',
-        'description': 'Start an interactive lesson/game mode. Use when user wants to play riddles, jokes, or trivia. This activates the FSM-controlled lesson mode which handles all question asking, answer checking, and feedback automatically. After calling this, the system takes over - you do NOT need to ask questions or check answers yourself.',
+        'description': 'Navigate to the games page when user wants to play riddles, jokes, trivia, spelling, math, or any game. This opens the games menu and pauses so the user can select a game and press play. Do NOT try to run the game yourself - just navigate and let the user choose.',
         'parameters': {
           'type': 'object',
           'properties': {
             'category': {
               'type': 'string',
-              'enum': ['riddle', 'joke', 'trivia', 'random'],
-              'description': 'Category: riddle, joke, trivia, or random for any',
+              'enum': ['riddle', 'joke', 'trivia', 'spelling', 'math', 'random'],
+              'description': 'The type of game the user asked for (used for response only)',
             },
           },
-          'required': ['category'],
+          'required': [],
         },
       },
     },
@@ -998,30 +1001,39 @@ class NoteToolsHandler {
     );
   }
 
-  /// Start lesson mode (FSM-controlled)
-  /// This hands control to the GameController which handles all questioning/answering
+  /// Navigate to games page for user to select and start a game
+  /// Does NOT start the game - just opens the menu and refreshes session
   Future<NoteToolResult> _startLessonMode(Map<String, dynamic> args) async {
-    final category = args['category'] as String? ?? 'random';
+    final category = args['category'] as String?;
 
-    debugPrint('NoteToolsHandler: Starting lesson mode with category: $category');
+    debugPrint('NoteToolsHandler: Navigating to games page (category hint: $category)');
 
     // Navigate to game page
     onNavigate?.call(AINavigationTarget.game);
 
-    // Trigger the FSM-controlled lesson mode
-    if (onStartLessonMode != null) {
-      await onStartLessonMode!(category);
+    // Pause after response plays - clean handoff to game AI
+    _shouldPauseAfterResponse = true;
 
-      return NoteToolResult(
-        success: true,
-        message: 'Lesson mode started. The system will handle asking questions and checking answers automatically. You do not need to do anything else - just let the user know you\'re starting.',
-      );
+    // Build a friendly response based on category
+    String message;
+    if (category == 'riddle') {
+      message = 'Here are the games! Tap Riddles and press play when you\'re ready.';
+    } else if (category == 'joke') {
+      message = 'Here are the games! Tap Jokes and press play when you\'re ready.';
+    } else if (category == 'trivia') {
+      message = 'Here are the games! Tap Trivia and press play when you\'re ready.';
+    } else if (category == 'spelling') {
+      message = 'Here are the games! Tap Spelling and press play when you\'re ready.';
+    } else if (category == 'math') {
+      message = 'Here are the games! Tap Math and press play when you\'re ready.';
     } else {
-      return NoteToolResult(
-        success: false,
-        message: 'Lesson mode not available.',
-      );
+      message = 'Here are the games! Pick one and press play when you\'re ready.';
     }
+
+    return NoteToolResult(
+      success: true,
+      message: message,
+    );
   }
 
   /// Exit lesson mode
@@ -1685,14 +1697,14 @@ NAVIGATION:
 - "go back" or "close the note" → use go_back to return to conversation
 - "switch to text" or "I want to type" → use show_chat
 - "make an image" or "generate a picture" → use show_image_generator
-- "let's play a game", "games", "riddles", "jokes", "trivia" → use start_lesson_mode
+- "let's play a game", "games", "riddles", "jokes", "trivia", "spelling", "math" → use start_lesson_mode (navigates to games page and pauses)
 
-GAMES/LESSONS - SIMPLE:
-- When user wants riddles/jokes/trivia, call start_lesson_mode with the category
-- The system takes over and handles all questions, answers, and feedback automatically
-- You do NOT need to ask questions or check answers - just acknowledge starting the game
-- If user wants to stop, call exit_lesson_mode
-- Example: User says "let's play riddles" → call start_lesson_mode(category="riddle") → respond "Let's go!"
+GAMES:
+- When user wants to play games, riddles, jokes, trivia, spelling, math, etc → call start_lesson_mode
+- This navigates to the games page and pauses so the user can select and start a game
+- Do NOT try to ask questions or run the game yourself - just navigate and let them choose
+- Example: User says "let's play riddles" → call start_lesson_mode(category="riddle")
+- The game AI will take over once the user presses play
 
 PAUSE:
 - "pause", "stop", "hold on", "wait", "be quiet", "stop listening" → use pause_conversation

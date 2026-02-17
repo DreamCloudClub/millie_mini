@@ -165,6 +165,7 @@ class AgentProvider extends ChangeNotifier {
             name: row['name'] as String? ?? 'Millie',
             faceColor: FaceColor.values[faceColorValue],
             eyeShape: EyeShape.values[eyeShapeValue],
+            faceImageId: row['face_image_id'] as String?,
             aiServiceId: row['ai_service_id'] as String? ?? 'dream_cloud_default',
             voice: row['voice'] as String? ?? 'Alloy',
             personalityId: row['personality_id'] as String? ?? 'default_home',
@@ -217,6 +218,7 @@ class AgentProvider extends ChangeNotifier {
     required String name,
     required FaceColor faceColor,
     required EyeShape eyeShape,
+    String? faceImageId,
     required String aiServiceId,
     required String voice,
     required String personalityId,
@@ -228,6 +230,7 @@ class AgentProvider extends ChangeNotifier {
       name: name,
       faceColor: faceColor,
       eyeShape: eyeShape,
+      faceImageId: faceImageId,
       aiServiceId: aiServiceId,
       voice: voice,
       personalityId: personalityId,
@@ -266,6 +269,8 @@ class AgentProvider extends ChangeNotifier {
     String? name,
     FaceColor? faceColor,
     EyeShape? eyeShape,
+    String? faceImageId,
+    bool clearFaceImageId = false,
     String? aiServiceId,
     String? voice,
     String? personalityId,
@@ -273,11 +278,13 @@ class AgentProvider extends ChangeNotifier {
   }) async {
     final index = _agents.indexWhere((a) => a.id == agentId);
     if (index == -1) return;
-    
+
     final updated = _agents[index].copyWith(
       name: name,
       faceColor: faceColor,
       eyeShape: eyeShape,
+      faceImageId: faceImageId,
+      clearFaceImageId: clearFaceImageId,
       aiServiceId: aiServiceId,
       voice: voice,
       personalityId: personalityId,
@@ -385,6 +392,7 @@ class AgentProvider extends ChangeNotifier {
         'name': agent.name,
         'face_color': agent.faceColor.index,
         'eye_shape': agent.eyeShape.index,
+        'face_image_id': agent.faceImageId,
         'ai_service_id': agent.aiServiceId,
         'voice': agent.voice,
         'personality_id': agent.personalityId,
@@ -412,6 +420,7 @@ class AgentProvider extends ChangeNotifier {
             'name': agent.name,
             'face_color': agent.faceColor.index,
             'eye_shape': agent.eyeShape.index,
+            'face_image_id': agent.faceImageId,
             'ai_service_id': agent.aiServiceId,
             'voice': agent.voice,
             'personality_id': agent.personalityId,
@@ -421,7 +430,7 @@ class AgentProvider extends ChangeNotifier {
           })
           .eq('id', agent.id)
           .eq('user_id', _userId!);
-      
+
       debugPrint('Agent updated in Supabase: ${agent.id}');
     } catch (e) {
       debugPrint('Error updating agent in Supabase: $e');

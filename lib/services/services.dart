@@ -7,5 +7,10 @@ export 'openai_service.dart';
 export 'reminder_scheduler_service.dart';
 export 'reminder_notification_service.dart';
 export 'reminder_intent_handler.dart';
-export 'game_questions_service.dart';
+export 'trivia_service.dart';
+export 'riddles_service.dart';
+export 'jokes_service.dart';
+export 'true_false_service.dart';
+export 'shapes_service.dart';
+export 'face_image_service.dart';
 

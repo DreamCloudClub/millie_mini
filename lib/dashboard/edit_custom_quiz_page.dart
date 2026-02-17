@@ -27,6 +27,8 @@ class _EditCustomQuizPageState extends State<EditCustomQuizPage> {
     'joke': false,
     'trivia': false,
     'spelling': false,
+    'letters': false,
+    'shapes': false,
     'math': false,
   };
   bool _isLoading = false;
@@ -234,6 +236,8 @@ class _EditCustomQuizPageState extends State<EditCustomQuizPage> {
               _buildCategoryCheckbox('joke', 'Jokes', Icons.sentiment_very_satisfied),
               _buildCategoryCheckbox('trivia', 'Trivia', Icons.quiz_outlined),
               _buildCategoryCheckbox('spelling', 'Spelling', Icons.spellcheck),
+              _buildCategoryCheckbox('letters', 'Letters', Icons.abc),
+              _buildCategoryCheckbox('shapes', 'Shapes', Icons.category),
               _buildCategoryCheckbox('math', 'Math', Icons.calculate),
 
               const SizedBox(height: AppSpacing.xl),

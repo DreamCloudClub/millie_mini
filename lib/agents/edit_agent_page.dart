@@ -1,11 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/providers.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
-import '../utils/text_helpers.dart';
 import '../widgets/widgets.dart';
-import '../widgets/confirm_dialog.dart';
+import '../services/image_cache_service.dart';
 
 class EditAgentPage extends StatefulWidget {
   final String? agentId;
@@ -28,14 +28,16 @@ class EditAgentPage extends StatefulWidget {
 class _EditAgentPageState extends State<EditAgentPage> {
   final _nameController = TextEditingController();
   final _introController = TextEditingController();
-  
+
   FaceColor _faceColor = FaceColor.white;
   EyeShape _eyeShape = EyeShape.roundedSquares;
+  String? _faceImageId;
+  bool _useAnimalFace = false;
   String? _aiServiceId;
   String _voice = 'Alloy';
   String _personalityId = 'default_home';
   String _introMessage = 'Hello {username}, it\'s me {agent_name} your personal AI Agent. How can I help you?';
-  
+
   bool get isNewAgent => widget.agentId == null;
 
   @override
@@ -55,6 +57,8 @@ class _EditAgentPageState extends State<EditAgentPage> {
         setState(() {
           _faceColor = agent.faceColor;
           _eyeShape = agent.eyeShape;
+          _faceImageId = agent.faceImageId;
+          _useAnimalFace = agent.faceImageId != null;
           _aiServiceId = agent.aiServiceId;
           _voice = agent.voice;
           _personalityId = agent.personalityId;
@@ -77,22 +81,17 @@ class _EditAgentPageState extends State<EditAgentPage> {
 
   Future<void> _handleSave() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter an agent name'),
-          backgroundColor: AppColors.error,
-        ),
-      );
       return;
     }
 
     final agentProvider = context.read<AgentProvider>();
-    
+
     if (isNewAgent) {
       await agentProvider.createAgent(
         name: _nameController.text.trim(),
         faceColor: _faceColor,
         eyeShape: _eyeShape,
+        faceImageId: _useAnimalFace ? _faceImageId : null,
         aiServiceId: _aiServiceId ?? 'dream_cloud_default',
         voice: _voice,
         personalityId: _personalityId,
@@ -104,6 +103,8 @@ class _EditAgentPageState extends State<EditAgentPage> {
         name: _nameController.text.trim(),
         faceColor: _faceColor,
         eyeShape: _eyeShape,
+        faceImageId: _useAnimalFace ? _faceImageId : null,
+        clearFaceImageId: !_useAnimalFace,
         aiServiceId: _aiServiceId,
         voice: _voice,
         personalityId: _personalityId,
@@ -112,19 +113,13 @@ class _EditAgentPageState extends State<EditAgentPage> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isNewAgent ? 'Agent created' : 'Agent updated'),
-          backgroundColor: AppColors.success,
-        ),
-      );
       widget.onSaved();
     }
   }
 
   Future<void> _handleDelete() async {
     if (isNewAgent) return;
-    
+
     final confirmed = await ConfirmDialog.show(
       context,
       title: 'Delete Agent',
@@ -136,38 +131,13 @@ class _EditAgentPageState extends State<EditAgentPage> {
     );
 
     if (confirmed && mounted) {
-      try {
-        final agentProvider = context.read<AgentProvider>();
-        await agentProvider.deleteAgent(widget.agentId!);
-        
-        if (mounted) {
-          if (agentProvider.error != null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(agentProvider.error!),
-                backgroundColor: AppColors.error,
-              ),
-            );
-            agentProvider.clearError();
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Agent deleted successfully'),
-                backgroundColor: AppColors.success,
-              ),
-            );
-            widget.onSaved();
-          }
-        }
-      } catch (e) {
-        if (!mounted) return;
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error deleting agent: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
+      final agentProvider = context.read<AgentProvider>();
+      await agentProvider.deleteAgent(widget.agentId!);
+
+      if (mounted && agentProvider.error == null) {
+        widget.onSaved();
+      } else {
+        agentProvider.clearError();
       }
     }
   }
@@ -214,8 +184,78 @@ class _EditAgentPageState extends State<EditAgentPage> {
                 child: FacePreview(
                   faceColor: _faceColor,
                   eyeShape: _eyeShape,
+                  faceImageId: _useAnimalFace ? _faceImageId : null,
                   size: 160,
                 ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+
+            // Face Type Selector
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppBorderRadius.card),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Face Type', style: AppTextStyles.label),
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _FaceTypeButton(
+                          label: 'Robot Face',
+                          isSelected: !_useAnimalFace,
+                          onTap: () {
+                            setState(() {
+                              _useAnimalFace = false;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _FaceTypeButton(
+                          label: 'Animal Face',
+                          isSelected: _useAnimalFace,
+                          onTap: () {
+                            setState(() {
+                              _useAnimalFace = true;
+                            });
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_useAnimalFace) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Consumer<FaceImageProvider>(
+                      builder: (context, faceImageProvider, _) {
+                        final faceImages = faceImageProvider.faceImages;
+                        if (faceImages.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No animal faces available',
+                              style: AppTextStyles.bodySmall,
+                            ),
+                          );
+                        }
+                        return _FaceImageGrid(
+                          faceImages: faceImages,
+                          selectedId: _faceImageId,
+                          onSelect: (id) {
+                            setState(() {
+                              _faceImageId = id;
+                            });
+                          },
+                        );
+                      },
+                    ),
+                  ],
+                ],
               ),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -244,6 +284,7 @@ class _EditAgentPageState extends State<EditAgentPage> {
                             hint: 'Enter agent name',
                             controller: _nameController,
                             enabled: !isDefaultMillie,
+                            textCapitalization: TextCapitalization.words,
                           ),
                           if (isDefaultMillie) ...[
                             const SizedBox(height: AppSpacing.xs),
@@ -260,56 +301,58 @@ class _EditAgentPageState extends State<EditAgentPage> {
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  
-                  // Face Color
-                  AppDropdown<FaceColor>(
-                    label: 'Face Color',
-                    value: _faceColor,
-                    items: FaceColor.values.map((color) {
-                      return DropdownMenuItem(
-                        value: color,
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 20,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                color: color.color,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: AppColors.divider),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            Text(color.displayName),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _faceColor = value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: AppSpacing.md),
 
-                  // Eye Shape
-                  AppDropdown<EyeShape>(
-                    label: 'Eye Shape',
-                    value: _eyeShape,
-                    items: EyeShape.values.map((shape) {
-                      return DropdownMenuItem(
-                        value: shape,
-                        child: Text(shape.displayName),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _eyeShape = value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: AppSpacing.md),
+                  // Face Color (only show for robot face)
+                  if (!_useAnimalFace) ...[
+                    AppDropdown<FaceColor>(
+                      label: 'Face Color',
+                      value: _faceColor,
+                      items: FaceColor.values.map((color) {
+                        return DropdownMenuItem(
+                          value: color,
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  color: color.color,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: AppColors.divider),
+                                ),
+                              ),
+                              const SizedBox(width: AppSpacing.sm),
+                              Text(color.displayName),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _faceColor = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+
+                    // Eye Shape
+                    AppDropdown<EyeShape>(
+                      label: 'Eye Shape',
+                      value: _eyeShape,
+                      items: EyeShape.values.map((shape) {
+                        return DropdownMenuItem(
+                          value: shape,
+                          child: Text(shape.displayName),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _eyeShape = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
 
                   // AI Service
                   Consumer<AIServiceProvider>(
@@ -512,6 +555,127 @@ class _EditAgentPageState extends State<EditAgentPage> {
             
             const SizedBox(height: AppSpacing.lg),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FaceTypeButton extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _FaceTypeButton({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.dreamCloudBlue.withOpacity(0.15)
+              : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(AppBorderRadius.small),
+          border: Border.all(
+            color: isSelected ? AppColors.dreamCloudBlue : AppColors.divider,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: AppTextStyles.bodyMedium.copyWith(
+            color: isSelected ? AppColors.dreamCloudBlue : AppColors.textPrimary,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FaceImageGrid extends StatelessWidget {
+  final List<FaceImage> faceImages;
+  final String? selectedId;
+  final void Function(String) onSelect;
+
+  const _FaceImageGrid({
+    required this.faceImages,
+    required this.selectedId,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        crossAxisSpacing: AppSpacing.sm,
+        mainAxisSpacing: AppSpacing.sm,
+        childAspectRatio: 1,
+      ),
+      itemCount: faceImages.length,
+      itemBuilder: (context, index) {
+        final face = faceImages[index];
+        final isSelected = face.id == selectedId;
+        final localPath = ImageCacheService.getFaceLocalPath(face.imageUrl);
+
+        return GestureDetector(
+          onTap: () => onSelect(face.id),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.faceBackground,
+              borderRadius: BorderRadius.circular(AppBorderRadius.small),
+              border: Border.all(
+                color: isSelected ? AppColors.dreamCloudBlue : AppColors.divider,
+                width: isSelected ? 3 : 1,
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppBorderRadius.small - 2),
+              child: localPath != null
+                  ? Image.file(
+                      File(localPath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _buildPlaceholder(face.name),
+                    )
+                  : face.imageUrl.isNotEmpty
+                      ? Image.network(
+                          face.imageUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _buildPlaceholder(face.name),
+                        )
+                      : _buildPlaceholder(face.name),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPlaceholder(String name) {
+    return Container(
+      color: Colors.grey.shade300,
+      child: Center(
+        child: Text(
+          name[0].toUpperCase(),
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
       ),
     );

@@ -241,6 +241,7 @@ class _AgentProfileCard extends StatelessWidget {
                 child: FacePreview(
                   faceColor: agent.faceColor,
                   eyeShape: agent.eyeShape,
+                  faceImageId: agent.faceImageId,
                   size: 280, // 2x larger
                 ),
               ),
@@ -408,7 +409,12 @@ class _GameSettingsCard extends StatelessWidget {
                 compactSpacing: true,
               ),
               _DetailRow(
-                label: 'Auto-Record',
+                label: 'Display Size',
+                value: settings.displaySize.displayName,
+                compactSpacing: true,
+              ),
+              _DetailRow(
+                label: 'Auto-Play',
                 value: settings.autoRecord ? 'On' : 'Off',
                 compactSpacing: true,
               ),

@@ -20,6 +20,10 @@ enum GradingType {
   /// Numeric comparison with tolerance
   /// Good for: Math problems, measurements
   numeric,
+
+  /// No grading - auto-advance after TTS
+  /// Good for: Lessons, demonstrations
+  none,
 }
 
 /// A lesson item (riddle, joke, trivia question, spelling, etc.)
@@ -31,6 +35,9 @@ class LessonItem {
   final List<String> aliases; // Alternative correct answers
   final GradingType gradingType; // How to evaluate the answer
   final double? numericTolerance; // For numeric grading type
+  final String? lettersPhonetic; // Phonetic pronunciation of letters for TTS
+  final String? cachedAudioUrl; // Cached TTS audio URL (for animals, etc.)
+  final String? imageUrl; // Image URL (for animals, shapes, etc.)
 
   const LessonItem({
     required this.id,
@@ -40,12 +47,19 @@ class LessonItem {
     this.aliases = const [],
     this.gradingType = GradingType.flexible,
     this.numericTolerance,
+    this.lettersPhonetic,
+    this.cachedAudioUrl,
+    this.imageUrl,
   });
 
   /// Get the text to speak via TTS (different from display for spelling/math)
   String get ttsPrompt {
     if (gradingType == GradingType.spelling) {
       return 'How do you spell $prompt?';
+    }
+    if (type == 'letters') {
+      // Don't say the letter - just ask the question
+      return 'What is this letter?';
     }
     if (type == 'math') {
       // Convert math symbols to spoken words for TTS
@@ -95,6 +109,9 @@ class LessonItem {
         return _checkNumeric(userAnswer);
       case GradingType.flexible:
         return _checkFlexible(userAnswer);
+      case GradingType.none:
+        // Lessons don't grade - always return true
+        return true;
     }
   }
 
@@ -371,6 +388,7 @@ class LessonItem {
       'aliases': aliases,
       'grading_type': gradingType.name,
       if (numericTolerance != null) 'numeric_tolerance': numericTolerance,
+      if (lettersPhonetic != null) 'letters_phonetic': lettersPhonetic,
     };
   }
 

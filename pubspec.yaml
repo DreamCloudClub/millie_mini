@@ -56,6 +56,7 @@ flutter:
   assets:
     - assets/icon/icon.png
     - assets/icon/logo.png
+    - assets/shapes/
 
 # App Icon Configuration
 flutter_launcher_icons:

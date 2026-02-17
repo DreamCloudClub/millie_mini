@@ -86,6 +86,7 @@ class Agent {
   final String name;
   final FaceColor faceColor;
   final EyeShape eyeShape;
+  final String? faceImageId;
   final String aiServiceId;
   final String voice;
   final String personalityId;
@@ -99,6 +100,7 @@ class Agent {
     required this.name,
     required this.faceColor,
     required this.eyeShape,
+    this.faceImageId,
     required this.aiServiceId,
     required this.voice,
     required this.personalityId,
@@ -108,11 +110,16 @@ class Agent {
     required this.updatedAt,
   });
 
+  /// Returns true if this agent uses a custom face image instead of robot face
+  bool get usesFaceImage => faceImageId != null;
+
   Agent copyWith({
     String? id,
     String? name,
     FaceColor? faceColor,
     EyeShape? eyeShape,
+    String? faceImageId,
+    bool clearFaceImageId = false,
     String? aiServiceId,
     String? voice,
     String? personalityId,
@@ -126,6 +133,7 @@ class Agent {
       name: name ?? this.name,
       faceColor: faceColor ?? this.faceColor,
       eyeShape: eyeShape ?? this.eyeShape,
+      faceImageId: clearFaceImageId ? null : (faceImageId ?? this.faceImageId),
       aiServiceId: aiServiceId ?? this.aiServiceId,
       voice: voice ?? this.voice,
       personalityId: personalityId ?? this.personalityId,
@@ -142,6 +150,7 @@ class Agent {
       'name': name,
       'faceColor': faceColor.index,
       'eyeShape': eyeShape.index,
+      'faceImageId': faceImageId,
       'aiServiceId': aiServiceId,
       'voice': voice,
       'personalityId': personalityId,
@@ -158,6 +167,7 @@ class Agent {
       name: json['name'] as String,
       faceColor: FaceColor.values[json['faceColor'] as int],
       eyeShape: EyeShape.values[json['eyeShape'] as int],
+      faceImageId: json['faceImageId'] as String?,
       aiServiceId: json['aiServiceId'] as String,
       voice: json['voice'] as String,
       personalityId: json['personalityId'] as String,

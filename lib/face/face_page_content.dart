@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/providers.dart';
@@ -5,6 +6,7 @@ import '../models/models.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
 import '../services/services.dart';
+import '../services/image_cache_service.dart';
 import 'face_eyes.dart';
 import 'face_mouth.dart';
 import 'control_bar.dart';
@@ -195,6 +197,106 @@ class _FacePageContentState extends State<FacePageContent> {
     widget.onNavigateToSchedule();
   }
 
+  Widget _buildFaceImageContent(
+    BuildContext context,
+    Agent agent,
+    VoiceProvider voiceProvider,
+    double screenW,
+    double screenH,
+  ) {
+    final faceImageProvider = context.read<FaceImageProvider>();
+    final faceImage = faceImageProvider.getById(agent.faceImageId);
+
+    if (faceImage == null) {
+      // Fallback to robot face if image not found
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Spacer(flex: 1),
+          FaceEyes(
+            faceColor: agent.faceColor,
+            eyeShape: agent.eyeShape,
+            faceState: voiceProvider.faceState,
+            screenWidth: screenW,
+            screenHeight: screenH,
+          ),
+          SizedBox(height: screenH * 0.12),
+          FaceMouth(
+            faceState: voiceProvider.faceState,
+            screenWidth: screenW,
+            faceColor: agent.faceColor,
+          ),
+          const Spacer(flex: 1),
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+            child: Text(
+              voiceProvider.state.statusText,
+              style: TextStyle(
+                fontFamily: AppTextStyles.fontFamily,
+                fontSize: 14,
+                color: Colors.white.withOpacity(0.5),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final localPath = ImageCacheService.getFaceLocalPath(faceImage.imageUrl);
+
+    return Stack(
+      children: [
+        // Full screen face image
+        Positioned.fill(
+          child: localPath != null
+              ? Image.file(
+                  File(localPath),
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                  errorBuilder: (_, __, ___) => _buildFallbackImage(screenW),
+                )
+              : faceImage.imageUrl.isNotEmpty
+                  ? Image.network(
+                      faceImage.imageUrl,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.topCenter,
+                      errorBuilder: (_, __, ___) => _buildFallbackImage(screenW),
+                    )
+                  : _buildFallbackImage(screenW),
+        ),
+
+        // Status text at bottom
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: AppSpacing.lg,
+          child: Text(
+            voiceProvider.state.statusText,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 14,
+              color: Colors.white.withOpacity(0.5),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFallbackImage(double size) {
+    return Container(
+      width: size,
+      height: size,
+      color: Colors.grey.shade800,
+      child: const Icon(
+        Icons.pets,
+        color: Colors.white54,
+        size: 80,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
@@ -217,6 +319,18 @@ class _FacePageContentState extends State<FacePageContent> {
                   return const SizedBox.shrink();
                 }
 
+                // Check if agent uses a face image
+                if (agent.usesFaceImage) {
+                  return _buildFaceImageContent(
+                    context,
+                    agent,
+                    voiceProvider,
+                    screenW,
+                    screenH,
+                  );
+                }
+
+                // Default robot face
                 return Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [

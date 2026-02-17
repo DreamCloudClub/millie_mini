@@ -3,13 +3,25 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'lesson_phase.dart';
 import 'lesson_item.dart';
-import '../services/game_questions_service.dart';
+import '../services/trivia_service.dart';
+import '../services/riddles_service.dart';
+import '../services/jokes_service.dart';
+import '../services/true_false_service.dart';
 import '../services/spelling_words_service.dart';
 import '../services/math_problem_service.dart';
+import '../services/letters_service.dart';
+import '../services/shapes_service.dart';
+import '../services/animals_service.dart';
 import '../providers/custom_quiz_provider.dart';
 
 /// Callback type for TTS playback
 typedef TTSCallback = Future<void> Function(String text);
+
+/// Callback type for spelling TTS (letter-by-letter with caching)
+typedef SpellingTTSCallback = Future<void> Function(String word);
+
+/// Callback type for playing audio files (cached TTS)
+typedef AudioFileCallback = Future<void> Function(String filePath);
 
 /// Callback type for mic control
 typedef MicStartCallback = Future<void> Function();
@@ -57,8 +69,14 @@ class GameController extends ChangeNotifier {
 
   /// Callbacks for TTS and mic control (wired from VoiceProvider/Pipeline)
   TTSCallback? onPlayTTS;
+  SpellingTTSCallback? onPlaySpellingTTS;
+  AudioFileCallback? onPlayAudioFile;
   MicStartCallback? onStartMic;
   MicStopCallback? onStopMic;
+  MicStopCallback? onStopTTS; // Stops audio playback immediately
+
+  /// Current TTS voice (for caching audio)
+  String _ttsVoice = 'nova';
 
   /// Callback when lesson mode starts (for navigation)
   VoidCallback? onLessonStarted;
@@ -80,6 +98,13 @@ class GameController extends ChangeNotifier {
 
   /// Whether game is paused
   bool get isPaused => _isPaused;
+
+  /// Whether pause is currently allowed (quizzes: only in LISTEN, lessons: anytime)
+  bool get canPause {
+    if (!_state.isGameRunning || _isPaused || _isExiting) return false;
+    final isLesson = _state.currentItem?.gradingType == GradingType.none;
+    return isLesson || _state.phase == LessonPhase.listen;
+  }
 
   /// Whether a category is selected and ready to start
   bool get isSelected => _state.phase == LessonPhase.selected;
@@ -127,6 +152,12 @@ class GameController extends ChangeNotifier {
     debugPrint('GameController: Auto-record set to $autoRecord');
   }
 
+  /// Set the TTS voice (for caching audio)
+  void setTTSVoice(String voice) {
+    _ttsVoice = voice;
+    debugPrint('GameController: TTS voice set to $voice');
+  }
+
   /// Set the CustomQuizProvider reference
   void setCustomQuizProvider(CustomQuizProvider provider) {
     _customQuizProvider = provider;
@@ -148,6 +179,9 @@ class GameController extends ChangeNotifier {
     if (_timeLimitSeconds == null || _timeLimitSeconds! <= 0) {
       return;
     }
+
+    // Cancel any existing timer first
+    _cancelTimer();
 
     _remainingSeconds = _timeLimitSeconds;
     debugPrint('GameController: Starting timer with $_remainingSeconds seconds');
@@ -181,6 +215,9 @@ class GameController extends ChangeNotifier {
 
   /// Handle timer expiration - stop mic and treat as empty answer
   Future<void> _handleTimerExpired() async {
+    // Guard against multiple calls
+    if (_countdownTimer == null) return;
+
     debugPrint('GameController: Timer expired - treating as timeout');
     _cancelTimer();
 
@@ -381,6 +418,9 @@ class GameController extends ChangeNotifier {
     _isMicActive = false;
     _cancelTimer();
 
+    // Stop TTS audio immediately
+    onStopTTS?.call();
+
     // Stop mic synchronously (fire and forget)
     onStopMic?.call();
 
@@ -417,6 +457,16 @@ class GameController extends ChangeNotifier {
         break;
 
       case LessonPhase.ask:
+        // For lessons (no grading), auto-advance after TTS without listening
+        if (_state.currentItem?.gradingType == GradingType.none) {
+          // Brief pause, then next question
+          Future.delayed(const Duration(seconds: 2), () {
+            if (!_isExiting && !_isPaused && _sessionId == sessionId) {
+              _fetchAndAskNextQuestion();
+            }
+          });
+          break;
+        }
         // After asking question, start listening (only if auto-record is on)
         if (_autoRecord) {
           _transitionToListen();
@@ -589,7 +639,21 @@ class GameController extends ChangeNotifier {
     );
     notifyListeners();
 
-    // Play the question (uses ttsPrompt for spelling mode)
+    // Check for cached audio (animals) - will generate and cache if not found
+    if (_state.isAnimalsMode && onPlayAudioFile != null) {
+      final audioPath = await AnimalsService.getAudioPath(
+        animalId: item.id,
+        text: item.ttsPrompt,
+        voice: _ttsVoice,
+      );
+      if (audioPath != null) {
+        debugPrint('GameController: Playing audio for ${item.answer}');
+        await onPlayAudioFile!(audioPath);
+        return; // onTTSFinished will be called when playback completes
+      }
+    }
+
+    // Fall back to regular TTS
     await _playTTSAndWait(item.ttsPrompt, currentSession);
 
     // onTTSFinished will handle the transition to LISTEN
@@ -621,13 +685,20 @@ class GameController extends ChangeNotifier {
     notifyListeners();
 
     // Play feedback
-    final feedbackText = isCorrect
-        ? _getCorrectFeedback()
-        : _getIncorrectFeedback(currentItem.answer);
-
-    await _playTTSAndWait(feedbackText, currentSession);
-
-    // onTTSFinished will handle the transition to next question
+    // For incorrect spelling answers, use special spelling TTS if available
+    if (!isCorrect &&
+        currentItem.gradingType == GradingType.spelling &&
+        onPlaySpellingTTS != null) {
+      debugPrint('GameController: Using spelling TTS for incorrect answer');
+      await onPlaySpellingTTS!(currentItem.answer);
+      // onTTSFinished will be called by SpellingTtsPlayer when done
+    } else {
+      final feedbackText = isCorrect
+          ? _getCorrectFeedback()
+          : _getIncorrectFeedback(currentItem.answer);
+      await _playTTSAndWait(feedbackText, currentSession);
+      // onTTSFinished will handle the transition to next question
+    }
   }
 
   // ============================================================
@@ -652,34 +723,53 @@ class GameController extends ChangeNotifier {
       return _getNextMathProblem(category);
     }
 
+    // Letters uses procedural generation (supports letters:mode format)
+    if (category == 'letters' || category.startsWith('letters:')) {
+      return _getNextLetter(category);
+    }
+
+    // Shapes uses procedural generation
+    if (category == 'shapes') {
+      return _getNextShape();
+    }
+
+    // Animals quiz uses database
+    if (category == 'animals' || category == 'animals:quiz') {
+      return _getNextAnimal();
+    }
+
+    // Animals lessons uses database (auto-play, no voice input)
+    if (category == 'animals:lessons') {
+      return _getNextAnimalLesson();
+    }
+
     // Spelling uses its own table/service
     if (category == 'spelling') {
       return _getNextSpellingWord();
     }
 
-    // All other categories use game_questions table
-    // Pass excludeIds to filter out questions already asked this session
-    final dbQuestion = await GameQuestionsService.getNextQuestion(
-      category,
-      difficulty: _difficultyFilter,
-      excludeIds: _askedItemIds,
-    );
-
-    if (dbQuestion != null) {
-      // Mark as used in database
-      await GameQuestionsService.markAsUsed(dbQuestion.id);
-
-      return LessonItem(
-        id: dbQuestion.id,
-        type: dbQuestion.category,
-        prompt: dbQuestion.question,
-        answer: dbQuestion.answer,
-        gradingType: GradingType.flexible,
-      );
+    // Trivia uses trivia_questions table
+    if (category == 'trivia') {
+      return _getNextTriviaQuestion();
     }
 
-    // Fallback to hardcoded items if database is empty or all used
-    debugPrint('GameController: Falling back to hardcoded items');
+    // Riddles use riddles table
+    if (category == 'riddle' || category == 'riddles') {
+      return _getNextRiddle();
+    }
+
+    // Jokes use jokes table
+    if (category == 'joke' || category == 'jokes') {
+      return _getNextJoke();
+    }
+
+    // True/False uses true_false_questions table
+    if (category == 'truefalse' || category == 'true false' || category == 'true or false') {
+      return _getNextTrueFalseQuestion();
+    }
+
+    // Fallback to hardcoded items for unknown categories
+    debugPrint('GameController: Unknown category $category, falling back to hardcoded items');
     for (final itemData in _hardcodedRiddles) {
       final id = itemData['id'] as String;
       if (!_askedItemIds.contains(id)) {
@@ -709,6 +799,96 @@ class GameController extends ChangeNotifier {
         prompt: word.word,
         answer: word.word,
         gradingType: GradingType.spelling,
+        lettersPhonetic: word.lettersPhonetic,
+      );
+    }
+
+    return null;
+  }
+
+  /// Get next trivia question from trivia_questions table
+  Future<LessonItem?> _getNextTriviaQuestion() async {
+    final question = await TriviaService.getNextQuestion(
+      difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
+    );
+
+    if (question != null) {
+      await TriviaService.markAsUsed(question.id);
+
+      return LessonItem(
+        id: question.id,
+        type: 'trivia',
+        prompt: question.question,
+        answer: question.answer,
+        gradingType: GradingType.flexible,
+      );
+    }
+
+    return null;
+  }
+
+  /// Get next riddle from riddles table
+  Future<LessonItem?> _getNextRiddle() async {
+    final riddle = await RiddlesService.getNextQuestion(
+      difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
+    );
+
+    if (riddle != null) {
+      await RiddlesService.markAsUsed(riddle.id);
+
+      return LessonItem(
+        id: riddle.id,
+        type: 'riddle',
+        prompt: riddle.question,
+        answer: riddle.answer,
+        gradingType: GradingType.flexible,
+      );
+    }
+
+    return null;
+  }
+
+  /// Get next joke from jokes table
+  Future<LessonItem?> _getNextJoke() async {
+    final joke = await JokesService.getNextQuestion(
+      difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
+    );
+
+    if (joke != null) {
+      await JokesService.markAsUsed(joke.id);
+
+      return LessonItem(
+        id: joke.id,
+        type: 'joke',
+        prompt: joke.question,
+        answer: joke.answer,
+        gradingType: GradingType.flexible,
+      );
+    }
+
+    return null;
+  }
+
+  /// Get next true/false question from true_false_questions table
+  Future<LessonItem?> _getNextTrueFalseQuestion() async {
+    final question = await TrueFalseService.getNextQuestion(
+      difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
+    );
+
+    if (question != null) {
+      await TrueFalseService.markAsUsed(question.id);
+
+      return LessonItem(
+        id: question.id,
+        type: 'truefalse',
+        prompt: 'True or false: ${question.statement}',
+        answer: question.answerText,
+        aliases: question.answer ? ['yes', 'correct', 'right'] : ['no', 'incorrect', 'wrong'],
+        gradingType: GradingType.flexible,
       );
     }
 
@@ -716,10 +896,10 @@ class GameController extends ChangeNotifier {
   }
 
   /// Get next item from a truly random mix of ALL categories
-  /// Includes: riddle, joke, trivia, spelling, math
+  /// Includes: riddle, joke, trivia, truefalse, spelling, math, letters
   Future<LessonItem?> _getNextRandomItem() async {
     // All available categories
-    const allCategories = ['riddle', 'joke', 'trivia', 'spelling', 'math'];
+    const allCategories = ['riddle', 'joke', 'trivia', 'truefalse', 'spelling', 'math', 'letters', 'shapes', 'animals'];
 
     // Shuffle and try each until we find one with available items
     final shuffled = List<String>.from(allCategories)..shuffle(Random());
@@ -731,24 +911,18 @@ class GameController extends ChangeNotifier {
         item = await _getNextSpellingWord();
       } else if (category == 'math') {
         item = await _getNextMathProblem('math');
-      } else {
-        // riddle, joke, trivia from game_questions
-        final dbQuestion = await GameQuestionsService.getNextQuestion(
-          category,
-          difficulty: _difficultyFilter,
-          excludeIds: _askedItemIds,
-        );
-
-        if (dbQuestion != null) {
-          await GameQuestionsService.markAsUsed(dbQuestion.id);
-          item = LessonItem(
-            id: dbQuestion.id,
-            type: dbQuestion.category,
-            prompt: dbQuestion.question,
-            answer: dbQuestion.answer,
-            gradingType: GradingType.flexible,
-          );
-        }
+      } else if (category == 'trivia') {
+        item = await _getNextTriviaQuestion();
+      } else if (category == 'riddle') {
+        item = await _getNextRiddle();
+      } else if (category == 'joke') {
+        item = await _getNextJoke();
+      } else if (category == 'truefalse') {
+        item = await _getNextTrueFalseQuestion();
+      } else if (category == 'letters') {
+        item = await _getNextLetter('letters:random');
+      } else if (category == 'shapes') {
+        item = await _getNextShape();
       }
 
       if (item != null) {
@@ -769,10 +943,14 @@ class GameController extends ChangeNotifier {
       if (operation == 'random') operation = null; // Random = no filter
     }
 
+    debugPrint('GameController: Generating math problem with difficulty=$_difficultyFilter, operation=$operation');
+
     final problem = MathProblemService.generate(
       difficulty: _difficultyFilter,
       operation: operation,
     );
+
+    debugPrint('GameController: Generated math: ${problem.question} = ${problem.answer}');
 
     return LessonItem(
       id: 'math_${DateTime.now().millisecondsSinceEpoch}',
@@ -783,7 +961,98 @@ class GameController extends ChangeNotifier {
     );
   }
 
+  /// Get next letter recognition problem
+  /// Category can be 'letters', 'letters:uppercase', 'letters:lowercase', 'letters:random'
+  Future<LessonItem?> _getNextLetter(String category) async {
+    // Parse mode from category (e.g., 'letters:uppercase' -> 'uppercase')
+    String mode = 'random';
+    if (category.contains(':')) {
+      mode = category.split(':')[1];
+    }
+
+    final problem = LettersService.generate(
+      mode: mode,
+      excludeIds: _askedItemIds,
+    );
+
+    if (problem == null) {
+      return null; // All letters shown
+    }
+
+    return LessonItem(
+      id: problem.letter, // Use the letter itself as ID for tracking
+      type: 'letters',
+      prompt: problem.letter,
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.flexible,
+    );
+  }
+
+  /// Get next procedurally-generated shape problem
+  Future<LessonItem?> _getNextShape() async {
+    final problem = ShapesService.generate(excludeIds: _askedItemIds);
+
+    if (problem == null) {
+      return null; // All shapes shown
+    }
+
+    return LessonItem(
+      id: problem.id,
+      type: 'shapes',
+      prompt: problem.hint, // "This shape has 3 sides. What is it?"
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.flexible,
+    );
+  }
+
+  /// Get next animal from database
+  Future<LessonItem?> _getNextAnimal() async {
+    final problem = await AnimalsService.generate(excludeIds: _askedItemIds);
+
+    if (problem == null) {
+      return null; // All animals shown
+    }
+
+    await AnimalsService.markAsUsed(problem.id);
+
+    return LessonItem(
+      id: problem.id,
+      type: 'animals',
+      prompt: problem.hint, // "This is a mammal. [description] What is it called?"
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.flexible,
+      cachedAudioUrl: problem.narrationAudioUrl,
+      imageUrl: problem.imageUrl,
+    );
+  }
+
+  /// Get next animal lesson (auto-play, no voice input)
+  Future<LessonItem?> _getNextAnimalLesson() async {
+    final problem = await AnimalsService.generateLesson(excludeIds: _askedItemIds);
+
+    if (problem == null) {
+      return null; // All animals shown
+    }
+
+    await AnimalsService.markAsUsed(problem.id);
+
+    return LessonItem(
+      id: problem.id,
+      type: 'animals:lesson',
+      prompt: problem.hint, // Full narration with type included
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.none, // No grading for lessons
+      cachedAudioUrl: problem.narrationAudioUrl,
+      imageUrl: problem.imageUrl,
+    );
+  }
+
   /// Get next item from a custom quiz (randomly picks from its categories)
+  /// Shuffles categories and tries each until one returns an item
   Future<LessonItem?> _getNextFromCustomQuiz(String quizId) async {
     if (_customQuizProvider == null) {
       debugPrint('GameController: No CustomQuizProvider set');
@@ -796,39 +1065,40 @@ class GameController extends ChangeNotifier {
       return null;
     }
 
-    // Randomly pick a category from the quiz's list
-    final random = Random();
-    final category = quiz.categories[random.nextInt(quiz.categories.length)];
-    debugPrint('GameController: Custom quiz "$quizId" picked category: $category');
+    // Shuffle categories and try each until we find one with available items
+    final shuffled = List<String>.from(quiz.categories)..shuffle(Random());
+    debugPrint('GameController: Custom quiz "$quizId" trying categories: $shuffled');
 
-    // Route to appropriate service based on picked category
-    if (category == 'spelling') {
-      return _getNextSpellingWord();
+    for (final category in shuffled) {
+      LessonItem? item;
+
+      if (category == 'spelling') {
+        item = await _getNextSpellingWord();
+      } else if (category == 'math' || category.startsWith('math:')) {
+        item = await _getNextMathProblem(category);
+      } else if (category == 'letters' || category.startsWith('letters:')) {
+        item = await _getNextLetter(category);
+      } else if (category == 'trivia') {
+        item = await _getNextTriviaQuestion();
+      } else if (category == 'riddle' || category == 'riddles') {
+        item = await _getNextRiddle();
+      } else if (category == 'joke' || category == 'jokes') {
+        item = await _getNextJoke();
+      } else if (category == 'truefalse' || category == 'true false' || category == 'true or false') {
+        item = await _getNextTrueFalseQuestion();
+      } else if (category == 'shapes') {
+        item = await _getNextShape();
+      } else if (category == 'animals' || category == 'animals:quiz') {
+        item = await _getNextAnimal();
+      }
+
+      if (item != null) {
+        debugPrint('GameController: Custom quiz got item from category: $category');
+        return item;
+      }
     }
 
-    if (category == 'math' || category.startsWith('math:')) {
-      return _getNextMathProblem(category);
-    }
-
-    // Use game_questions for other categories
-    final dbQuestion = await GameQuestionsService.getNextQuestion(
-      category,
-      difficulty: _difficultyFilter,
-      excludeIds: _askedItemIds,
-    );
-
-    if (dbQuestion != null) {
-      await GameQuestionsService.markAsUsed(dbQuestion.id);
-
-      return LessonItem(
-        id: dbQuestion.id,
-        type: dbQuestion.category,
-        prompt: dbQuestion.question,
-        answer: dbQuestion.answer,
-        gradingType: GradingType.flexible,
-      );
-    }
-
+    debugPrint('GameController: Custom quiz exhausted all categories');
     return null;
   }
 
@@ -869,6 +1139,24 @@ class GameController extends ChangeNotifier {
         return "Let's practice multiplication! I'll give you some problems to solve.";
       case 'math:division':
         return "Let's practice division! I'll give you some problems to solve.";
+      case 'truefalse':
+      case 'true false':
+      case 'true or false':
+        return "Let's play true or false! I'll make a statement and you tell me if it's true or false.";
+      case 'letters':
+      case 'letters:random':
+        return "Let's learn letters! I'll show you a letter and you tell me what it is.";
+      case 'letters:uppercase':
+        return "Let's learn uppercase letters! I'll show you each letter from A to Z.";
+      case 'letters:lowercase':
+        return "Let's learn lowercase letters! I'll show you each letter from a to z.";
+      case 'shapes':
+        return "Let's learn shapes! I'll show you a shape and you tell me what it is.";
+      case 'animals':
+      case 'animals:quiz':
+        return "Let's learn about animals! I'll show you an animal and describe it, then you tell me what it's called.";
+      case 'animals:lessons':
+        return "Let's learn about animals! I'll show you an animal and tell you all about it.";
       default:
         return "Let's play! I'll ask you some questions.";
     }
@@ -906,14 +1194,28 @@ class GameController extends ChangeNotifier {
   String _getIncorrectFeedback(String correctAnswer) {
     // For spelling mode, spell out each letter clearly for TTS
     if (_state.currentItem?.gradingType == GradingType.spelling) {
-      // Say the word, then spell each letter as a separate sentence
-      // "apple" becomes "apple. A. P. P. L. E."
-      // Using periods forces TTS to pause between each letter
+      // Generate TTS-safe spelling at runtime with forced pauses
+      // Using " ... " creates natural pauses that TTS respects
       final letters = correctAnswer.toUpperCase().split('');
-      final spelled = letters.map((l) => '$l.').join(' ');
-      return "${correctAnswer.toLowerCase()}. $spelled";
+      final spelled = letters.join(' ... ');
+      final feedback = "Not quite. The word is ${correctAnswer.toLowerCase()}. $spelled";
+      debugPrint('GameController: Spelling feedback TTS: "$feedback"');
+      return feedback;
     }
     return "The answer is: $correctAnswer.";
+  }
+
+  /// Convert a single letter to its phonetic pronunciation for TTS
+  static String _letterToPhonetic(String letter) {
+    const phoneticMap = {
+      'A': 'Ay', 'B': 'Bee', 'C': 'See', 'D': 'Dee', 'E': 'Eee',
+      'F': 'Ef', 'G': 'Jee', 'H': 'Aitch', 'I': 'Eye', 'J': 'Jay',
+      'K': 'Kay', 'L': 'El', 'M': 'Em', 'N': 'En', 'O': 'Oh',
+      'P': 'Pee', 'Q': 'Cue', 'R': 'Ar', 'S': 'Ess', 'T': 'Tee',
+      'U': 'You', 'V': 'Vee', 'W': 'Double-You', 'X': 'Ex', 'Y': 'Why',
+      'Z': 'Zee',
+    };
+    return phoneticMap[letter.toUpperCase()] ?? letter;
   }
 
   // ============================================================
@@ -945,24 +1247,30 @@ class GameController extends ChangeNotifier {
   // MANUAL CONTROLS (for UI buttons)
   // ============================================================
 
-  /// Pause the game - stops mic and timer
+  /// Pause the game - for quizzes only works during LISTEN phase, for lessons works anytime
   Future<void> pauseGame() async {
     if (!_state.isGameRunning || _isPaused || _isExiting) {
       debugPrint('GameController: Cannot pause - not running or already paused');
       return;
     }
 
-    // Only allow pause during LISTEN phase (recording/countdown)
-    if (_state.phase != LessonPhase.listen) {
-      debugPrint('GameController: Cannot pause - not in LISTEN phase (current: ${_state.phase})');
+    // For quizzes, only allow pause during LISTEN phase (timer running)
+    final isLesson = _state.currentItem?.gradingType == GradingType.none;
+    if (!isLesson && _state.phase != LessonPhase.listen) {
+      debugPrint('GameController: Cannot pause quiz - not in LISTEN phase');
       return;
     }
 
-    debugPrint('GameController: Pausing game from LISTEN phase');
+    debugPrint('GameController: Pausing game from phase ${_state.phase}');
     _isPaused = true;
     _pausedFromPhase = _state.phase;
 
-    // Stop mic
+    // Stop TTS audio immediately (for lessons)
+    if (isLesson) {
+      await onStopTTS?.call();
+    }
+
+    // Stop mic if active
     if (_isMicActive) {
       _isMicActive = false;
       await onStopMic?.call();
@@ -974,7 +1282,7 @@ class GameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Resume the game - restarts mic and timer
+  /// Resume the game - restarts timer for quizzes, replays TTS for lessons
   Future<void> resumeGame() async {
     if (!_state.isGameRunning || !_isPaused || _isExiting) {
       debugPrint('GameController: Cannot resume - not paused or not running');
@@ -984,10 +1292,32 @@ class GameController extends ChangeNotifier {
     debugPrint('GameController: Resuming game to phase $_pausedFromPhase');
     _isPaused = false;
 
-    // Restart mic if we were in listen phase
+    // For lessons (GradingType.none), replay the current item
+    if (_state.currentItem?.gradingType == GradingType.none && _state.currentItem != null) {
+      final currentSession = _sessionId;
+      _state = _state.copyWith(phase: LessonPhase.ask);
+      _pausedFromPhase = null;
+      notifyListeners();
+
+      final item = _state.currentItem!;
+      if (_state.isAnimalsMode && onPlayAudioFile != null) {
+        final audioPath = await AnimalsService.getAudioPath(
+          animalId: item.id,
+          text: item.ttsPrompt,
+          voice: _ttsVoice,
+        );
+        if (audioPath != null) {
+          await onPlayAudioFile!(audioPath);
+          return;
+        }
+      }
+      await _playTTSAndWait(item.ttsPrompt, currentSession);
+      return;
+    }
+
+    // For quizzes: restart mic and timer if we were in listen phase
     if (_pausedFromPhase == LessonPhase.listen) {
       _isMicActive = true;
-      // Restart timer if we had a time limit
       _startTimer();
       await onStartMic?.call();
     }
@@ -1014,8 +1344,14 @@ class GameController extends ChangeNotifier {
       await onStopMic?.call();
     }
 
-    // Reveal answer and move on
+    // Reveal answer and move on (skip feedback for lessons)
     if (_state.currentItem != null) {
+      // For lessons, just move to next item without feedback
+      if (_state.currentItem!.gradingType == GradingType.none) {
+        _fetchAndAskNextQuestion();
+        return;
+      }
+
       _state = _state.copyWith(
         phase: LessonPhase.feedback,
         isCorrect: false,

@@ -25,6 +25,7 @@ class _GameSettingsEditPageState extends State<GameSettingsEditPage> {
   TimeLimit _timeLimit = TimeLimit.none;
   GameDifficulty _difficulty = GameDifficulty.medium;
   bool _autoRecord = true;
+  DisplaySize _displaySize = DisplaySize.normal;
   bool _isLoading = false;
 
   @override
@@ -41,6 +42,7 @@ class _GameSettingsEditPageState extends State<GameSettingsEditPage> {
       _timeLimit = settings.timeLimit;
       _difficulty = settings.difficulty;
       _autoRecord = settings.autoRecord;
+      _displaySize = settings.displaySize;
     });
   }
 
@@ -55,6 +57,7 @@ class _GameSettingsEditPageState extends State<GameSettingsEditPage> {
         timeLimit: _timeLimit,
         difficulty: _difficulty,
         autoRecord: _autoRecord,
+        displaySize: _displaySize,
       ));
 
       if (!mounted) return;
@@ -167,11 +170,36 @@ class _GameSettingsEditPageState extends State<GameSettingsEditPage> {
                     style: AppTextStyles.bodySmall,
                   ),
                   const SizedBox(height: AppSpacing.lg),
+                  AppDropdown<DisplaySize>(
+                    label: 'Display Size',
+                    value: _displaySize,
+                    items: DisplaySize.values
+                        .map((d) => DropdownMenuItem(
+                              value: d,
+                              child: Text(d.displayName),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _displaySize = value;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    _displaySize == DisplaySize.large
+                        ? 'Larger text and images for easier viewing.'
+                        : 'Standard size text and images.',
+                    style: AppTextStyles.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text(
-                        'Auto-Record',
+                        'Auto-Play',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
