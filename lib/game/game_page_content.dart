@@ -354,43 +354,47 @@ class _GamePageContentState extends State<GamePageContent> {
         child: Column(
           children: [
             // Fun Games - opens submenu
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.celebration,
               title: 'Fun Games',
               subtitle: 'Riddles, jokes, trivia & more',
+              description: 'Challenge your brain with riddles, laugh at silly jokes, test your knowledge with trivia, and play true or false!',
               isSelected: false,
               onTap: () => setState(() => _showBrainGamesMenu = true),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
             // Learning - opens submenu
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.school,
               title: 'Learning',
-              subtitle: 'Letters, shapes, spelling & more',
+              subtitle: 'Letters, numbers, shapes & more',
+              description: 'Learn the alphabet, practice counting, identify shapes, spell words out loud, solve math problems, and discover animals!',
               isSelected: false,
               onTap: () => setState(() => _showLearningMenu = true),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
             // Random - direct selection
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.shuffle,
               title: 'Random',
               subtitle: 'Mix it up',
+              description: 'A surprise mix of everything! Riddles, trivia, math, spelling, animals, and more. You never know what question is coming next!',
               isSelected: selectedCategory == 'random',
               onTap: () => voiceProvider.selectLessonCategory('random'),
             ),
 
             // Custom quizzes
             ...customQuizzes.map((quiz) => Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.md),
-              child: _GameOptionButton(
+              padding: const EdgeInsets.only(top: AppSpacing.lg),
+              child: _MainMenuCard(
                 icon: Icons.auto_awesome,
                 title: quiz.name,
                 subtitle: quiz.categoriesDisplay,
+                description: 'Your custom quiz! A personalized mix of categories chosen just for you. Create and edit custom quizzes in the Settings menu.',
                 isSelected: selectedCategory == 'custom:${quiz.id}',
                 onTap: () => voiceProvider.selectLessonCategory('custom:${quiz.id}'),
               ),
@@ -409,40 +413,44 @@ class _GamePageContentState extends State<GamePageContent> {
       child: SingleChildScrollView(
         child: Column(
           children: [
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.psychology,
               title: 'Riddles',
               subtitle: 'Test your thinking',
+              description: 'Can you solve the puzzle? Listen carefully to the clues and think hard to figure out the answer. These brain teasers will challenge your mind!',
               isSelected: selectedCategory == 'riddle',
               onTap: () => voiceProvider.selectLessonCategory('riddle'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.sentiment_very_satisfied,
               title: 'Jokes',
               subtitle: 'Laugh along',
+              description: 'Get ready to giggle! Listen to funny jokes and try to guess the punchline before it\'s revealed. Warning: silliness ahead!',
               isSelected: selectedCategory == 'joke',
               onTap: () => voiceProvider.selectLessonCategory('joke'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.quiz_outlined,
               title: 'Trivia',
               subtitle: 'Test your knowledge',
+              description: 'How much do you know? Answer fun questions about science, history, animals, geography, and more. Learn something new with every question!',
               isSelected: selectedCategory == 'trivia',
               onTap: () => voiceProvider.selectLessonCategory('trivia'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.check_circle_outline,
               title: 'True or False',
               subtitle: 'Fact or fiction?',
+              description: 'Is it true or is it false? Listen to a statement and decide if it\'s fact or fiction. Some answers might surprise you!',
               isSelected: selectedCategory == 'truefalse',
               onTap: () => voiceProvider.selectLessonCategory('truefalse'),
             ),
@@ -460,50 +468,66 @@ class _GamePageContentState extends State<GamePageContent> {
       child: SingleChildScrollView(
         child: Column(
           children: [
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.abc,
               title: 'Letters',
               subtitle: 'Learn the alphabet',
+              description: 'Practice recognizing letters! See a letter on screen and say its name out loud. Choose uppercase, lowercase, or a random mix.',
               isSelected: selectedCategory?.startsWith('letters') ?? false,
               onTap: () => setState(() => _showLettersMenu = true),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
+              icon: Icons.looks_one,
+              title: 'Numbers',
+              subtitle: 'Learn to count',
+              description: 'Practice recognizing numbers! See a number on screen and say it out loud. Difficulty settings control the number range.',
+              isSelected: selectedCategory == 'numbers',
+              onTap: () => voiceProvider.selectLessonCategory('numbers'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _MainMenuCard(
               icon: Icons.category,
               title: 'Shapes',
               subtitle: 'Learn shapes',
+              description: 'Can you name that shape? Look at the picture and use the clues to identify circles, squares, triangles, and more!',
               isSelected: selectedCategory == 'shapes',
               onTap: () => voiceProvider.selectLessonCategory('shapes'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.spellcheck,
               title: 'Spelling',
               subtitle: 'Spell words out loud',
+              description: 'See a word and spell it out loud letter by letter. Great for building vocabulary and practicing phonics!',
               isSelected: selectedCategory == 'spelling',
               onTap: () => voiceProvider.selectLessonCategory('spelling'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.calculate,
               title: 'Math',
               subtitle: 'Practice arithmetic',
+              description: 'Solve math problems! Practice addition, subtraction, multiplication, and division. Difficulty settings adjust the challenge.',
               isSelected: selectedCategory?.startsWith('math') ?? false,
               onTap: () => setState(() => _showMathMenu = true),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.pets,
               title: 'Animals',
               subtitle: 'Learn about animals',
+              description: 'Discover amazing animals from around the world! Learn fun facts about mammals, birds, fish, reptiles, and more.',
               isSelected: selectedCategory?.startsWith('animals') ?? false,
               onTap: () => setState(() => _showAnimalsMenu = true),
             ),
@@ -521,50 +545,55 @@ class _GamePageContentState extends State<GamePageContent> {
       child: SingleChildScrollView(
         child: Column(
           children: [
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.add,
               title: 'Addition',
               subtitle: 'Practice adding numbers',
+              description: 'How fast can you add? Solve addition problems and build your math skills. Difficulty settings control how big the numbers get!',
               isSelected: selectedCategory == 'math:addition',
               onTap: () => voiceProvider.selectLessonCategory('math:addition'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.remove,
               title: 'Subtraction',
               subtitle: 'Practice subtracting numbers',
+              description: 'Take it away! Solve subtraction problems and sharpen your mental math. Great for learning to count backwards!',
               isSelected: selectedCategory == 'math:subtraction',
               onTap: () => voiceProvider.selectLessonCategory('math:subtraction'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.close,
               title: 'Multiplication',
               subtitle: 'Practice multiplying numbers',
+              description: 'Times tables and beyond! Practice multiplying numbers together. Perfect for mastering your times tables!',
               isSelected: selectedCategory == 'math:multiplication',
               onTap: () => voiceProvider.selectLessonCategory('math:multiplication'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.safety_divider,
               title: 'Division',
               subtitle: 'Practice dividing numbers',
+              description: 'Split it up! Learn to divide numbers and find the answer. Great for understanding how numbers break apart!',
               isSelected: selectedCategory == 'math:division',
               onTap: () => voiceProvider.selectLessonCategory('math:division'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.shuffle,
               title: 'Random',
               subtitle: 'Mix all operations',
+              description: 'A mix of all math operations! Addition, subtraction, multiplication, and division all jumbled together. Keep your brain sharp!',
               isSelected: selectedCategory == 'math:random',
               onTap: () => voiceProvider.selectLessonCategory('math:random'),
             ),
@@ -582,30 +611,33 @@ class _GamePageContentState extends State<GamePageContent> {
       child: SingleChildScrollView(
         child: Column(
           children: [
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.text_fields,
               title: 'Uppercase A-Z',
               subtitle: 'Learn uppercase letters in order',
+              description: 'Go through the alphabet from A to Z! Practice recognizing big letters one at a time in order. Perfect for beginners!',
               isSelected: selectedCategory == 'letters:uppercase',
               onTap: () => voiceProvider.selectLessonCategory('letters:uppercase'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.text_format,
               title: 'Lowercase a-z',
               subtitle: 'Learn lowercase letters in order',
+              description: 'Go through the alphabet from a to z! Practice recognizing small letters one at a time in order. Great for learning to read!',
               isSelected: selectedCategory == 'letters:lowercase',
               onTap: () => voiceProvider.selectLessonCategory('letters:lowercase'),
             ),
 
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
 
-            _GameOptionButton(
+            _MainMenuCard(
               icon: Icons.shuffle,
               title: 'Random',
               subtitle: 'Mix of uppercase and lowercase',
+              description: 'Letters in random order! A mix of big and small letters to keep you on your toes. Test how well you know your ABCs!',
               isSelected: selectedCategory == 'letters:random',
               onTap: () => voiceProvider.selectLessonCategory('letters:random'),
             ),
@@ -627,7 +659,7 @@ class _GamePageContentState extends State<GamePageContent> {
               icon: Icons.school,
               title: 'Lessons',
               subtitle: 'Learn about animals',
-              description: 'See pictures and hear fun facts about mammals, birds, fish, reptiles, and more',
+              description: 'See pictures and hear fun facts about mammals, birds, fish, reptiles, and more! Discover what makes each animal special.',
               isSelected: selectedCategory == 'animals:lessons',
               onTap: () => voiceProvider.selectLessonCategory('animals:lessons'),
             ),
@@ -638,7 +670,7 @@ class _GamePageContentState extends State<GamePageContent> {
               icon: Icons.quiz,
               title: 'Quiz',
               subtitle: 'Test your knowledge',
-              description: 'See an animal and try to name it - how many can you get right?',
+              description: 'See an animal and try to name it! Listen to the clues and guess which animal it is. How many can you get right?',
               isSelected: selectedCategory == 'animals:quiz',
               onTap: () => voiceProvider.selectLessonCategory('animals:quiz'),
             ),
@@ -649,7 +681,7 @@ class _GamePageContentState extends State<GamePageContent> {
               icon: Icons.shuffle,
               title: 'Random',
               subtitle: 'Mix it up',
-              description: 'A mix of lessons and quizzes - sometimes learn, sometimes guess!',
+              description: 'A mix of lessons and quizzes! Sometimes you\'ll learn new facts, sometimes you\'ll guess the animal. Keeps things exciting!',
               isSelected: selectedCategory == 'animals:random',
               onTap: () => voiceProvider.selectLessonCategory('animals:random'),
             ),
@@ -679,6 +711,8 @@ class _GamePageContentState extends State<GamePageContent> {
       return _buildSpellingDisplay(context, lessonState, remainingSeconds);
     } else if (lessonState.isLettersMode) {
       return _buildLettersDisplay(context, lessonState, remainingSeconds);
+    } else if (lessonState.isNumbersMode) {
+      return _buildNumbersDisplay(context, lessonState, remainingSeconds);
     } else if (lessonState.isShapesMode) {
       return _buildShapesDisplay(context, lessonState, remainingSeconds);
     } else if (lessonState.currentItem?.type == 'animals:lesson') {
@@ -725,6 +759,8 @@ class _GamePageContentState extends State<GamePageContent> {
         return ("Uppercase Letters!", "I'll show you each letter from A to Z.");
       case 'letters:lowercase':
         return ("Lowercase Letters!", "I'll show you each letter from a to z.");
+      case 'numbers':
+        return ("Let's learn numbers!", "I'll show you a number and you tell me what it is.");
       case 'math':
       case 'math:random':
         return ("Let's practice math!", "I'll give you some problems to solve.");
@@ -925,6 +961,74 @@ class _GamePageContentState extends State<GamePageContent> {
             style: TextStyle(
               fontFamily: AppTextStyles.fontFamily,
               fontSize: letterFontSize,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+
+          const Spacer(flex: 1),
+
+          // Timer during LISTEN phase, Answer during FEEDBACK phase
+          _buildTimerOrAnswer(context, lessonState),
+
+          const Spacer(flex: 1),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNumbersDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
+    final number = lessonState.displayQuestion;
+
+    // Get display size setting (number size is fixed, prompt adjusts)
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    const numberFontSize = 180.0; // Fixed size
+    final promptFontSize = isLarge ? 48.0 : 32.0;
+    final progressFontSize = isLarge ? 33.0 : 22.0;
+
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        vertical: isLarge ? AppSpacing.xl : AppSpacing.lg,
+        horizontal: isLarge ? AppSpacing.xl : AppSpacing.lg,
+      ),
+      child: Column(
+        children: [
+          // Progress indicator
+          if (lessonState.questionCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: Text(
+                lessonState.progressText,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: progressFontSize,
+                  color: Colors.white.withOpacity(0.6),
+                ),
+              ),
+            ),
+
+          const Spacer(flex: 1),
+
+          // Prompt text
+          Text(
+            'What number is this?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: promptFontSize,
+              color: Colors.white.withOpacity(0.7),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // LARGE NUMBER DISPLAY
+          Text(
+            number.isEmpty ? '...' : number,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: numberFontSize,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
@@ -1395,8 +1499,8 @@ class _GamePageContentState extends State<GamePageContent> {
     final answerText = lessonState.displayAnswer;
     final isCorrect = lessonState.isCorrect == true;
 
-    // For letters mode, just show "Correct!" or "Incorrect" without the answer
-    if (lessonState.isLettersMode) {
+    // For letters and numbers mode, just show "Correct!" or "Incorrect" without the answer
+    if (lessonState.isLettersMode || lessonState.isNumbersMode) {
       return Container(
         width: double.infinity,
         margin: const EdgeInsets.only(top: AppSpacing.md),
@@ -1540,6 +1644,102 @@ class _GameOptionButton extends StatelessWidget {
                       fontFamily: AppTextStyles.fontFamily,
                       fontSize: 16,
                       color: Colors.white.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Large card for main menu with description aligned with title
+class _MainMenuCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String description;
+  final VoidCallback onTap;
+  final bool isSelected;
+
+  const _MainMenuCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.description,
+    required this.onTap,
+    this.isSelected = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(AppBorderRadius.large),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.dreamCloudBlue
+                : Colors.white.withOpacity(0.2),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppColors.dreamCloudBlue.withOpacity(0.2)
+                    : Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                icon,
+                color: isSelected ? AppColors.dreamCloudBlue : Colors.white,
+                size: 36,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? AppColors.dreamCloudBlue : Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 18,
+                      color: Colors.white.withOpacity(0.7),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 15,
+                      color: Colors.white.withOpacity(0.5),
+                      height: 1.4,
                     ),
                   ),
                 ],

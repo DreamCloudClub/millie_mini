@@ -61,6 +61,10 @@ class LessonItem {
       // Don't say the letter - just ask the question
       return 'What is this letter?';
     }
+    if (type == 'numbers') {
+      // Don't say the number - just ask the question
+      return 'What is this number?';
+    }
     if (type == 'math') {
       // Convert math symbols to spoken words for TTS
       return prompt

@@ -10,6 +10,7 @@ import '../services/true_false_service.dart';
 import '../services/spelling_words_service.dart';
 import '../services/math_problem_service.dart';
 import '../services/letters_service.dart';
+import '../services/numbers_service.dart';
 import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
 import '../providers/custom_quiz_provider.dart';
@@ -728,6 +729,11 @@ class GameController extends ChangeNotifier {
       return _getNextLetter(category);
     }
 
+    // Numbers uses procedural generation with difficulty
+    if (category == 'numbers') {
+      return _getNextNumber();
+    }
+
     // Shapes uses procedural generation
     if (category == 'shapes') {
       return _getNextShape();
@@ -926,6 +932,8 @@ class GameController extends ChangeNotifier {
         item = await _getNextTrueFalseQuestion();
       } else if (category == 'letters') {
         item = await _getNextLetter('letters:random');
+      } else if (category == 'numbers') {
+        item = await _getNextNumber();
       } else if (category == 'shapes') {
         item = await _getNextShape();
       }
@@ -988,6 +996,28 @@ class GameController extends ChangeNotifier {
       id: problem.letter, // Use the letter itself as ID for tracking
       type: 'letters',
       prompt: problem.letter,
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.flexible,
+    );
+  }
+
+  /// Get next number recognition problem
+  /// Uses difficulty setting: 'easy' (0-9), 'medium' (10-99), 'hard' (100-999)
+  Future<LessonItem?> _getNextNumber() async {
+    final problem = NumbersService.generate(
+      difficulty: _difficultyFilter,
+      excludeIds: _askedItemIds,
+    );
+
+    if (problem == null) {
+      return null; // All numbers shown
+    }
+
+    return LessonItem(
+      id: problem.number, // Use the number itself as ID for tracking
+      type: 'numbers',
+      prompt: problem.number,
       answer: problem.answer,
       aliases: problem.aliases,
       gradingType: GradingType.flexible,
@@ -1101,6 +1131,8 @@ class GameController extends ChangeNotifier {
         item = await _getNextMathProblem(category);
       } else if (category == 'letters' || category.startsWith('letters:')) {
         item = await _getNextLetter(category);
+      } else if (category == 'numbers') {
+        item = await _getNextNumber();
       } else if (category == 'trivia') {
         item = await _getNextTriviaQuestion();
       } else if (category == 'riddle' || category == 'riddles') {
@@ -1173,6 +1205,8 @@ class GameController extends ChangeNotifier {
         return "Let's learn uppercase letters! I'll show you each letter from A to Z.";
       case 'letters:lowercase':
         return "Let's learn lowercase letters! I'll show you each letter from a to z.";
+      case 'numbers':
+        return "Let's learn numbers! I'll show you a number and you tell me what it is.";
       case 'shapes':
         return "Let's learn shapes! I'll show you a shape and you tell me what it is.";
       case 'animals':

@@ -115,6 +115,9 @@ class LessonState {
   /// Whether current question is letters mode
   bool get isLettersMode => currentItem?.type == 'letters';
 
+  /// Whether current question is numbers mode
+  bool get isNumbersMode => currentItem?.type == 'numbers';
+
   /// Whether current question is shapes mode
   bool get isShapesMode => currentItem?.type == 'shapes';
 
