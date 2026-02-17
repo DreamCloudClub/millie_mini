@@ -55,11 +55,26 @@ class AgentProvider extends ChangeNotifier {
         // Try to load from Supabase first
         await _loadAgentsFromSupabase();
       }
-      
+
       // Fallback to local storage if no agents loaded
       if (_agents.isEmpty) {
         _agents = await _storage.getAgents();
         debugPrint('Loaded ${_agents.length} agents from local storage');
+      } else {
+        // Merge local customFaceId into Supabase-loaded agents
+        // (custom faces are stored locally, not in Supabase)
+        final localAgents = await _storage.getAgents();
+        if (localAgents.isNotEmpty) {
+          final localAgentMap = {for (var a in localAgents) a.id: a};
+          _agents = _agents.map((agent) {
+            final localAgent = localAgentMap[agent.id];
+            if (localAgent?.customFaceId != null) {
+              return agent.copyWith(customFaceId: localAgent!.customFaceId);
+            }
+            return agent;
+          }).toList();
+          debugPrint('Merged customFaceId from local storage');
+        }
       }
       
       // Get active agent

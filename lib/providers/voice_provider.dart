@@ -14,6 +14,7 @@ import '../game/game_controller.dart';
 import '../game/lesson_phase.dart';
 import 'reminder_provider.dart';
 import 'custom_quiz_provider.dart';
+import 'openclaw_provider.dart';
 
 class VoiceProvider extends ChangeNotifier {
   final _uuid = const Uuid();
@@ -22,6 +23,7 @@ class VoiceProvider extends ChangeNotifier {
   late final SpellingTtsPlayer _spellingTtsPlayer;
   ReminderIntentHandler? _reminderIntentHandler;
   ReminderProvider? _reminderProvider;
+  OpenClawProvider? _openClawProvider;
   final NoteToolsHandler _noteToolsHandler = NoteToolsHandler();
 
   VoiceState _state = VoiceState.sleep;
@@ -75,6 +77,52 @@ class VoiceProvider extends ChangeNotifier {
     final weatherService = WeatherService(apiKey);
     _noteToolsHandler.setWeatherService(weatherService);
     debugPrint('VoiceProvider: WeatherService initialized');
+  }
+
+  /// Set OpenClawProvider reference (for alternative LLM routing in conversation mode)
+  void setOpenClawProvider(OpenClawProvider provider) {
+    _openClawProvider = provider;
+    // Listen for changes to update the pipeline's alternative handler
+    provider.addListener(_updateOpenClawHandler);
+    _updateOpenClawHandler();
+    debugPrint('VoiceProvider: OpenClawProvider set');
+  }
+
+  /// Update the pipeline's alternative LLM handler based on OpenClaw state
+  void _updateOpenClawHandler() {
+    if (_openClawProvider == null) return;
+
+    if (_openClawProvider!.enabled && !_gameController.isActive) {
+      // OpenClaw enabled and NOT in game mode - use OpenClaw for conversations
+      _pipeline.alternativeLLMHandler = _handleOpenClawMessage;
+      debugPrint('VoiceProvider: OpenClaw handler enabled');
+    } else {
+      // OpenClaw disabled or in game mode - use default LLM
+      _pipeline.alternativeLLMHandler = null;
+      debugPrint('VoiceProvider: OpenClaw handler disabled (enabled=${_openClawProvider!.enabled}, gameActive=${_gameController.isActive})');
+    }
+  }
+
+  /// Handle message via OpenClaw
+  Future<String?> _handleOpenClawMessage(String message) async {
+    if (_openClawProvider == null || !_openClawProvider!.enabled) {
+      return null; // Fall back to default LLM
+    }
+
+    try {
+      final response = await _openClawProvider!.sendMessage(message);
+      if (response == null) {
+        // OpenClaw failed - speak error via TTS
+        final errorMessage = "I'm having trouble connecting. You may need to check your OpenClaw settings.";
+        debugPrint('VoiceProvider: OpenClaw error - ${_openClawProvider!.error}');
+        // Return error message to be spoken (this will go through TTS)
+        return errorMessage;
+      }
+      return response;
+    } catch (e) {
+      debugPrint('VoiceProvider: OpenClaw exception - $e');
+      return "I'm having trouble connecting. You may need to check your OpenClaw settings.";
+    }
   }
 
   /// Set CustomQuizProvider reference (for custom quiz game mode)
@@ -212,6 +260,8 @@ class VoiceProvider extends ChangeNotifier {
 
     // Wire navigation callbacks
     _gameController.onLessonStarted = () {
+      // Disable OpenClaw during games - games always use standard AI
+      _updateOpenClawHandler();
       onNavigateToGame?.call();
       notifyListeners();
     };
@@ -219,6 +269,8 @@ class VoiceProvider extends ChangeNotifier {
     _gameController.onLessonEnded = () {
       // Resume to paused state after lesson ends
       transitionTo(VoiceState.paused);
+      // Re-enable OpenClaw if it was enabled
+      _updateOpenClawHandler();
       notifyListeners();
 
       // Check for any pending reminder alerts that were queued during the game

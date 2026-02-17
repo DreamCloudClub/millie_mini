@@ -7,4 +7,5 @@ export 'reminder_provider.dart';
 export 'game_settings_provider.dart';
 export 'custom_quiz_provider.dart';
 export 'face_image_provider.dart';
+export 'openclaw_provider.dart';
 

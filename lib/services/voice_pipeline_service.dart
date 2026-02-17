@@ -93,9 +93,14 @@ class VoicePipelineService {
 
   // Reminder intent handler callback
   Future<String?> Function(String userInput, List<Map<String, dynamic>> reminders)? onProcessReminderIntent;
-  
+
   // Note tools handler for AI note operations
   NoteToolsHandler? noteToolsHandler;
+
+  /// Alternative LLM handler for conversation mode (e.g., OpenClaw)
+  /// When set, this is used instead of the default OpenAI _callLLM for conversations.
+  /// Returns null to fall back to default LLM, or response string if handled.
+  Future<String?> Function(String userMessage)? alternativeLLMHandler;
   
   VoicePipelineService(StorageService storageService) 
       : _openaiService = OpenAIService(storageService),
@@ -1613,17 +1618,29 @@ Format note content nicely with line breaks, bullet points, and clear sections.
     required List<Map<String, dynamic>> conversationHistory,
   }) async {
     debugPrint('LLM processing: $transcription');
-    
+
     try {
+      // Check if alternative LLM handler is set (e.g., OpenClaw for conversation mode)
+      if (alternativeLLMHandler != null) {
+        debugPrint('Using alternative LLM handler (OpenClaw)');
+        final alternativeResponse = await alternativeLLMHandler!(transcription);
+        if (alternativeResponse != null) {
+          debugPrint('Alternative LLM response: ${alternativeResponse.substring(0, alternativeResponse.length > 50 ? 50 : alternativeResponse.length)}...');
+          return alternativeResponse;
+        }
+        // If alternative returns null, fall through to default LLM
+        debugPrint('Alternative LLM returned null, falling back to default');
+      }
+
       // Build enhanced system prompt with note context if available
       String enhancedPrompt = personalityPrompt;
       if (noteToolsHandler != null) {
         enhancedPrompt += noteToolsHandler!.getActiveNoteContext();
       }
-      
+
       // Get note tools if handler is available
       final tools = noteToolsHandler != null ? NoteToolsHandler.toolDefinitions : null;
-      
+
       // Use OpenAI Chat Completions API with tools
       var response = await _openaiService.callChatCompletions(
         systemPrompt: enhancedPrompt,

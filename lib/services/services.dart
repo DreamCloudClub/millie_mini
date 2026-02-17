@@ -13,4 +13,5 @@ export 'jokes_service.dart';
 export 'true_false_service.dart';
 export 'shapes_service.dart';
 export 'face_image_service.dart';
+export 'openclaw_service.dart';
 

@@ -14,6 +14,7 @@ class DashboardPage extends StatelessWidget {
   final VoidCallback onEditAIService;
   final VoidCallback onEditAccountSettings;
   final VoidCallback onEditGameSettings;
+  final VoidCallback onEditOpenClaw;
 
   const DashboardPage({
     super.key,
@@ -23,6 +24,7 @@ class DashboardPage extends StatelessWidget {
     required this.onEditAIService,
     required this.onEditAccountSettings,
     required this.onEditGameSettings,
+    required this.onEditOpenClaw,
   });
 
   @override
@@ -131,7 +133,11 @@ class DashboardPage extends StatelessWidget {
               _AIServiceCard(onEdit: onEditAIService),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 5: Account Settings
+              // Card 5: OpenClaw
+              _OpenClawCard(onEdit: onEditOpenClaw),
+              const SizedBox(height: AppSpacing.md),
+
+              // Card 6: Account Settings
               _AccountSettingsCard(onEdit: onEditAccountSettings),
               const SizedBox(height: AppSpacing.lg),
             ],
@@ -249,8 +255,8 @@ class _AgentProfileCard extends StatelessWidget {
               const SizedBox(height: AppSpacing.xl),
               // Agent details
               _DetailRow(
-                label: 'Face',
-                value: '${agent.faceColor.displayName} ${agent.eyeShape.displayName}',
+                label: 'Name',
+                value: agent.name,
                 compactSpacing: true,
               ),
               _DetailRow(
@@ -419,6 +425,88 @@ class _GameSettingsCard extends StatelessWidget {
                 value: settings.autoRecord ? 'On' : 'Off',
                 compactSpacing: true,
               ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OpenClawCard extends StatelessWidget {
+  final VoidCallback onEdit;
+
+  const _OpenClawCard({required this.onEdit});
+
+  Color _getStatusColor(OpenClawConnectionState state, bool enabled) {
+    if (!enabled) return AppColors.textLight;
+    switch (state) {
+      case OpenClawConnectionState.connected:
+        return AppColors.success;
+      case OpenClawConnectionState.connecting:
+        return Colors.orange;
+      case OpenClawConnectionState.error:
+        return AppColors.error;
+      case OpenClawConnectionState.disconnected:
+        return AppColors.textLight;
+    }
+  }
+
+  String _getStatusText(OpenClawConnectionState state, bool enabled) {
+    if (!enabled) return 'Disabled';
+    switch (state) {
+      case OpenClawConnectionState.connected:
+        return 'Connected';
+      case OpenClawConnectionState.connecting:
+        return 'Connecting...';
+      case OpenClawConnectionState.error:
+        return 'Error';
+      case OpenClawConnectionState.disconnected:
+        return 'Disconnected';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<OpenClawProvider>(
+      builder: (context, provider, _) {
+        return AppCard(
+          title: 'OpenClaw',
+          onEdit: onEdit,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: _getStatusColor(provider.connectionState, provider.enabled),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    _getStatusText(provider.connectionState, provider.enabled),
+                    style: AppTextStyles.bodyLarge.copyWith(
+                      fontSize: 18,
+                      color: _getStatusColor(provider.connectionState, provider.enabled),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              if (provider.enabled && provider.url.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.sm),
+                  child: Text(
+                    provider.url.length > 35
+                        ? '${provider.url.substring(0, 35)}...'
+                        : provider.url,
+                    style: AppTextStyles.bodySmall,
+                  ),
+                ),
             ],
           ),
         );

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'services/services.dart';
 import 'services/image_cache_service.dart';
 import 'providers/providers.dart';
+import 'providers/openclaw_provider.dart';
 import 'utils/constants.dart';
 import 'splash_page.dart';
 import 'auth/login_page.dart';
@@ -13,6 +14,7 @@ import 'dashboard/dashboard_page.dart';
 import 'dashboard/user_profile_edit_page.dart';
 import 'dashboard/account_settings_edit_page.dart';
 import 'dashboard/game_settings_edit_page.dart';
+import 'dashboard/openclaw_settings_page.dart';
 import 'agents/agent_profiles_page.dart';
 import 'agents/edit_agent_page.dart';
 import 'personalities/personality_builder_page.dart';
@@ -93,6 +95,9 @@ class MillieMiniApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => FaceImageProvider(),
         ),
+        ChangeNotifierProvider(
+          create: (_) => OpenClawProvider(storageService),
+        ),
       ],
       child: MaterialApp(
         title: 'Millie Mini',
@@ -149,6 +154,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       context.read<GameSettingsProvider>().init(),
       context.read<CustomQuizProvider>().loadQuizzes(),
       context.read<FaceImageProvider>().init(),
+      context.read<OpenClawProvider>().init(),
     ]);
     
     // Wire up ReminderIntentHandler in VoiceProvider
@@ -159,6 +165,10 @@ class _AppNavigatorState extends State<AppNavigator> {
     // Wire up CustomQuizProvider for custom game quizzes
     final customQuizProvider = context.read<CustomQuizProvider>();
     voiceProvider.setCustomQuizProvider(customQuizProvider);
+
+    // Wire up OpenClawProvider for alternative LLM routing
+    final openClawProvider = context.read<OpenClawProvider>();
+    voiceProvider.setOpenClawProvider(openClawProvider);
 
     // Initialize WeatherService if API key is configured in Supabase
     try {
@@ -291,6 +301,7 @@ enum MainRoute {
   userProfile,
   accountSettings,
   gameSettings,
+  openClawSettings,
   agentProfiles,
   editAgent,
   personalityBuilder,
@@ -338,6 +349,7 @@ class _MainNavigatorState extends State<MainNavigator> {
           onEditAIService: () => _push(MainRoute.aiServices),
           onEditAccountSettings: () => _push(MainRoute.accountSettings),
           onEditGameSettings: () => _push(MainRoute.gameSettings),
+          onEditOpenClaw: () => _push(MainRoute.openClawSettings),
         );
 
       case MainRoute.face:
@@ -381,6 +393,17 @@ class _MainNavigatorState extends State<MainNavigator> {
               MainRoute.editCustomQuiz,
               params: {'quizId': quizId},
             ),
+          ),
+        );
+
+      case MainRoute.openClawSettings:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: OpenClawSettingsPage(
+            onBack: _pop,
           ),
         );
 
