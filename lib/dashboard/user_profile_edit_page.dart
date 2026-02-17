@@ -174,12 +174,14 @@ class _UserProfileEditPageState extends State<UserProfileEditPage> {
                   label: 'First Name',
                   hint: 'Enter first name',
                   controller: _firstNameController,
+                  textCapitalization: TextCapitalization.words,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppTextField(
                   label: 'Last Name',
                   hint: 'Enter last name',
                   controller: _lastNameController,
+                  textCapitalization: TextCapitalization.words,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppTextField(
@@ -193,6 +195,7 @@ class _UserProfileEditPageState extends State<UserProfileEditPage> {
                   hint: 'Tell us about yourself',
                   controller: _bioController,
                   maxLines: 4,
+                  textCapitalization: TextCapitalization.sentences,
                 ),
                 const SizedBox(height: AppSpacing.xl),
                 AppButton(
