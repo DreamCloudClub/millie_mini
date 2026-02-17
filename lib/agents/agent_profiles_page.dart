@@ -167,6 +167,7 @@ class _AgentCard extends StatelessWidget {
                 faceColor: agent.faceColor,
                 eyeShape: agent.eyeShape,
                 faceImageId: agent.faceImageId,
+                customFaceId: agent.customFaceId,
                 size: 120,
               ),
               const SizedBox(width: AppSpacing.lg),

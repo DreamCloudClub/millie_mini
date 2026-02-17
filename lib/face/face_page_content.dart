@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
 import '../services/services.dart';
+import '../services/custom_face_service.dart';
 import '../services/image_cache_service.dart';
 import 'face_eyes.dart';
 import 'face_mouth.dart';
@@ -297,6 +298,97 @@ class _FacePageContentState extends State<FacePageContent> {
     );
   }
 
+  Widget _buildCustomFaceContent(
+    BuildContext context,
+    Agent agent,
+    VoiceProvider voiceProvider,
+  ) {
+    return FutureBuilder<String?>(
+      future: CustomFaceService.getLocalPath(agent.customFaceId!),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Colors.white54),
+          );
+        }
+
+        final localPath = snapshot.data;
+        if (localPath == null) {
+          // Fallback to robot face if custom face not found
+          return _buildRobotFaceFallback(agent, voiceProvider);
+        }
+
+        return Stack(
+          children: [
+            // Full screen custom face image
+            Positioned.fill(
+              child: Image.file(
+                File(localPath),
+                fit: BoxFit.cover,
+                alignment: Alignment.topCenter,
+                errorBuilder: (_, __, ___) =>
+                    _buildRobotFaceFallback(agent, voiceProvider),
+              ),
+            ),
+
+            // Status text at bottom
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: AppSpacing.lg,
+              child: Text(
+                voiceProvider.state.statusText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: 14,
+                  color: Colors.white.withOpacity(0.5),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRobotFaceFallback(Agent agent, VoiceProvider voiceProvider) {
+    final screenW = MediaQuery.of(context).size.width;
+    final screenH = MediaQuery.of(context).size.height;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Spacer(flex: 1),
+        FaceEyes(
+          faceColor: agent.faceColor,
+          eyeShape: agent.eyeShape,
+          faceState: voiceProvider.faceState,
+          screenWidth: screenW,
+          screenHeight: screenH,
+        ),
+        SizedBox(height: screenH * 0.12),
+        FaceMouth(
+          faceState: voiceProvider.faceState,
+          screenWidth: screenW,
+          faceColor: agent.faceColor,
+        ),
+        const Spacer(flex: 1),
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+          child: Text(
+            voiceProvider.state.statusText,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 14,
+              color: Colors.white.withOpacity(0.5),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
@@ -319,7 +411,16 @@ class _FacePageContentState extends State<FacePageContent> {
                   return const SizedBox.shrink();
                 }
 
-                // Check if agent uses a face image
+                // Check if agent uses a custom face (local AI-generated)
+                if (agent.usesCustomFace) {
+                  return _buildCustomFaceContent(
+                    context,
+                    agent,
+                    voiceProvider,
+                  );
+                }
+
+                // Check if agent uses a face image (animal face from Supabase)
                 if (agent.usesFaceImage) {
                   return _buildFaceImageContent(
                     context,

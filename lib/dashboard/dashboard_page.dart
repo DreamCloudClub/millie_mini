@@ -242,6 +242,7 @@ class _AgentProfileCard extends StatelessWidget {
                   faceColor: agent.faceColor,
                   eyeShape: agent.eyeShape,
                   faceImageId: agent.faceImageId,
+                  customFaceId: agent.customFaceId,
                   size: 280, // 2x larger
                 ),
               ),

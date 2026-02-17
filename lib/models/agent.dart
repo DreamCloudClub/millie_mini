@@ -87,6 +87,7 @@ class Agent {
   final FaceColor faceColor;
   final EyeShape eyeShape;
   final String? faceImageId;
+  final String? customFaceId;
   final String aiServiceId;
   final String voice;
   final String personalityId;
@@ -101,6 +102,7 @@ class Agent {
     required this.faceColor,
     required this.eyeShape,
     this.faceImageId,
+    this.customFaceId,
     required this.aiServiceId,
     required this.voice,
     required this.personalityId,
@@ -110,8 +112,11 @@ class Agent {
     required this.updatedAt,
   });
 
-  /// Returns true if this agent uses a custom face image instead of robot face
+  /// Returns true if this agent uses an animal face image
   bool get usesFaceImage => faceImageId != null;
+
+  /// Returns true if this agent uses a custom AI-generated face
+  bool get usesCustomFace => customFaceId != null;
 
   Agent copyWith({
     String? id,
@@ -120,6 +125,8 @@ class Agent {
     EyeShape? eyeShape,
     String? faceImageId,
     bool clearFaceImageId = false,
+    String? customFaceId,
+    bool clearCustomFaceId = false,
     String? aiServiceId,
     String? voice,
     String? personalityId,
@@ -134,6 +141,7 @@ class Agent {
       faceColor: faceColor ?? this.faceColor,
       eyeShape: eyeShape ?? this.eyeShape,
       faceImageId: clearFaceImageId ? null : (faceImageId ?? this.faceImageId),
+      customFaceId: clearCustomFaceId ? null : (customFaceId ?? this.customFaceId),
       aiServiceId: aiServiceId ?? this.aiServiceId,
       voice: voice ?? this.voice,
       personalityId: personalityId ?? this.personalityId,
@@ -151,6 +159,7 @@ class Agent {
       'faceColor': faceColor.index,
       'eyeShape': eyeShape.index,
       'faceImageId': faceImageId,
+      'customFaceId': customFaceId,
       'aiServiceId': aiServiceId,
       'voice': voice,
       'personalityId': personalityId,
@@ -168,6 +177,7 @@ class Agent {
       faceColor: FaceColor.values[json['faceColor'] as int],
       eyeShape: EyeShape.values[json['eyeShape'] as int],
       faceImageId: json['faceImageId'] as String?,
+      customFaceId: json['customFaceId'] as String?,
       aiServiceId: json['aiServiceId'] as String,
       voice: json['voice'] as String,
       personalityId: json['personalityId'] as String,

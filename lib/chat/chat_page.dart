@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:gal/gal.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import '../providers/providers.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
@@ -727,46 +730,131 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        child: AspectRatio(
-          aspectRatio: 1.0, // DALL-E generates square images
-          child: Image.network(
-            imageUrl,
-            fit: BoxFit.cover,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) {
-                // Image loaded - scroll to show it
-                WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-                return child;
-              }
-              return Container(
-                color: Colors.white.withOpacity(0.1),
-                child: Center(
-                  child: CircularProgressIndicator(
-                    value: loadingProgress.expectedTotalBytes != null
-                        ? loadingProgress.cumulativeBytesLoaded /
-                            loadingProgress.expectedTotalBytes!
-                        : null,
+        child: Stack(
+          children: [
+            AspectRatio(
+              aspectRatio: 1.0, // DALL-E generates square images
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) {
+                    // Image loaded - scroll to show it
+                    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+                    return child;
+                  }
+                  return Container(
+                    color: Colors.white.withOpacity(0.1),
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                                loadingProgress.expectedTotalBytes!
+                            : null,
+                        color: Colors.white,
+                      ),
+                    ),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: Colors.white.withOpacity(0.1),
+                    child: const Center(
+                      child: Icon(
+                        Icons.error_outline,
+                        color: Colors.white54,
+                        size: 48,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            // Save button in upper right corner
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: () => _saveImage(imageUrl),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.blue,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.save_alt,
                     color: Colors.white,
+                    size: 22,
                   ),
                 ),
-              );
-            },
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              color: Colors.white.withOpacity(0.1),
-              child: const Center(
-                child: Icon(
-                  Icons.error_outline,
-                  color: Colors.white54,
-                  size: 48,
-                ),
               ),
-            );
-          },
-          ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  /// Save image to device gallery
+  Future<void> _saveImage(String imageUrl) async {
+    try {
+      // Show saving indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Saving image...'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+
+      // Download image
+      final response = await http.get(Uri.parse(imageUrl));
+      if (response.statusCode != 200) {
+        throw Exception('Failed to download image');
+      }
+
+      // Save to temp file first
+      final tempDir = await getTemporaryDirectory();
+      final fileName = 'millie_image_${DateTime.now().millisecondsSinceEpoch}.png';
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(response.bodyBytes);
+
+      // Save to gallery
+      await Gal.putImage(tempFile.path, album: 'Millie Mini');
+
+      // Clean up temp file
+      await tempFile.delete();
+
+      // Show success
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Image saved to gallery'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save image: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
   
   /// Build loading indicator while generating image

@@ -743,6 +743,11 @@ class GameController extends ChangeNotifier {
       return _getNextAnimalLesson();
     }
 
+    // Animals random - mix of quiz and lessons
+    if (category == 'animals:random') {
+      return _getNextAnimalRandom();
+    }
+
     // Spelling uses its own table/service
     if (category == 'spelling') {
       return _getNextSpellingWord();
@@ -1051,6 +1056,24 @@ class GameController extends ChangeNotifier {
     );
   }
 
+  /// Get next animal - randomly picks between quiz and lesson
+  Future<LessonItem?> _getNextAnimalRandom() async {
+    // Randomly pick between quiz (0) and lesson (1)
+    final isLesson = Random().nextBool();
+
+    if (isLesson) {
+      final item = await _getNextAnimalLesson();
+      if (item != null) return item;
+      // Fall back to quiz if no lessons available
+      return _getNextAnimal();
+    } else {
+      final item = await _getNextAnimal();
+      if (item != null) return item;
+      // Fall back to lesson if no quiz available
+      return _getNextAnimalLesson();
+    }
+  }
+
   /// Get next item from a custom quiz (randomly picks from its categories)
   /// Shuffles categories and tries each until one returns an item
   Future<LessonItem?> _getNextFromCustomQuiz(String quizId) async {
@@ -1157,6 +1180,8 @@ class GameController extends ChangeNotifier {
         return "Let's learn about animals! I'll show you an animal and describe it, then you tell me what it's called.";
       case 'animals:lessons':
         return "Let's learn about animals! I'll show you an animal and tell you all about it.";
+      case 'animals:random':
+        return "Let's explore animals! Sometimes I'll quiz you, and sometimes I'll teach you something new.";
       default:
         return "Let's play! I'll ask you some questions.";
     }

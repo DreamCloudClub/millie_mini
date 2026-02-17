@@ -23,13 +23,17 @@ class EditCustomQuizPage extends StatefulWidget {
 class _EditCustomQuizPageState extends State<EditCustomQuizPage> {
   final _nameController = TextEditingController();
   final Map<String, bool> _selectedCategories = {
+    // Fun Games
     'riddle': false,
     'joke': false,
     'trivia': false,
+    'truefalse': false,
+    // Learning Games
     'spelling': false,
     'letters': false,
     'shapes': false,
     'math': false,
+    'animals': false,
   };
   bool _isLoading = false;
   bool _isDeleting = false;
@@ -229,16 +233,24 @@ class _EditCustomQuizPageState extends State<EditCustomQuizPage> {
                 style: AppTextStyles.bodySmall,
               ),
 
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.lg),
 
-              // Category checkboxes
+              // Fun Games section
+              _buildSectionHeader('Fun Games', Icons.celebration),
               _buildCategoryCheckbox('riddle', 'Riddles', Icons.psychology),
               _buildCategoryCheckbox('joke', 'Jokes', Icons.sentiment_very_satisfied),
               _buildCategoryCheckbox('trivia', 'Trivia', Icons.quiz_outlined),
+              _buildCategoryCheckbox('truefalse', 'True or False', Icons.check_circle_outline),
+
+              const SizedBox(height: AppSpacing.lg),
+
+              // Learning Games section
+              _buildSectionHeader('Learning Games', Icons.school),
               _buildCategoryCheckbox('spelling', 'Spelling', Icons.spellcheck),
               _buildCategoryCheckbox('letters', 'Letters', Icons.abc),
               _buildCategoryCheckbox('shapes', 'Shapes', Icons.category),
               _buildCategoryCheckbox('math', 'Math', Icons.calculate),
+              _buildCategoryCheckbox('animals', 'Animals', Icons.pets),
 
               const SizedBox(height: AppSpacing.xl),
 
@@ -265,6 +277,26 @@ class _EditCustomQuizPageState extends State<EditCustomQuizPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: AppColors.dreamCloudBlue),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.dreamCloudBlue,
+            ),
+          ),
+        ],
       ),
     );
   }

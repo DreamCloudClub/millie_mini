@@ -43,6 +43,9 @@ dependencies:
   # Image Picker
   image_picker: ^1.0.7
 
+  # Image Saver
+  gal: ^2.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -30,6 +30,8 @@ class VoicePipelineService {
   bool _isRecording = false;
   bool _isPlaying = false;
   bool _isContinuousMode = false;
+  Completer<void>? _audioPlaybackCompleter; // Track current audio playback for cancellation
+  bool _audioForceStopped = false; // Flag to prevent callbacks after force stop
   bool _isPaused = false;
   bool _isProcessing = false; // Guard to prevent parallel processing
   bool _isStopping = false; // Guard to prevent concurrent stop operations
@@ -939,7 +941,13 @@ class VoicePipelineService {
   /// Force stop any audio playback immediately
   Future<void> forceStopAudio() async {
     debugPrint('Force stopping audio playback');
+    _audioForceStopped = true; // Set flag to prevent callbacks
     try {
+      // Complete any pending audio playback completer first
+      if (_audioPlaybackCompleter != null && !_audioPlaybackCompleter!.isCompleted) {
+        _audioPlaybackCompleter!.complete();
+        _audioPlaybackCompleter = null;
+      }
       // Stop and release to ensure immediate silence
       await _player.stop();
       await _player.release();
@@ -1242,6 +1250,7 @@ class VoicePipelineService {
 
   /// Play an audio file for lesson mode (cached TTS, no generation)
   Future<void> playAudioFileForLesson(String audioPath) async {
+    _audioForceStopped = false; // Reset flag at start
     try {
       debugPrint('Playing cached audio: $audioPath');
       onStateChange?.call(VoiceState.speaking);
@@ -1249,21 +1258,30 @@ class VoicePipelineService {
       try { await _player.stop(); } catch (_) {}
       _isPlaying = true;
 
-      final completer = Completer<void>();
+      // Use tracked completer so forceStopAudio can cancel it
+      _audioPlaybackCompleter = Completer<void>();
       StreamSubscription<void>? subscription;
       subscription = _player.onPlayerComplete.listen((_) {
-        if (!completer.isCompleted) {
-          completer.complete();
+        if (_audioPlaybackCompleter != null && !_audioPlaybackCompleter!.isCompleted) {
+          _audioPlaybackCompleter!.complete();
           subscription?.cancel();
         }
       });
 
       await _player.play(DeviceFileSource(audioPath));
-      await completer.future.timeout(const Duration(seconds: 120), onTimeout: () {
+      await _audioPlaybackCompleter!.future.timeout(const Duration(seconds: 120), onTimeout: () {
         subscription?.cancel();
       });
+      subscription.cancel();
+      _audioPlaybackCompleter = null;
       _isPlaying = false;
       debugPrint('Cached audio playback complete');
+
+      // Skip callback if we were force-stopped
+      if (_audioForceStopped) {
+        debugPrint('Audio was force-stopped - skipping callback');
+        return;
+      }
 
       // Wait a moment before callback
       await Future.delayed(const Duration(milliseconds: 300));
@@ -1272,8 +1290,11 @@ class VoicePipelineService {
       onTTSPlaybackComplete?.call();
     } catch (e) {
       debugPrint('Error playing cached audio: $e');
-      // Still fire callback on error so FSM doesn't get stuck
-      onTTSPlaybackComplete?.call();
+      _audioPlaybackCompleter = null;
+      // Still fire callback on error so FSM doesn't get stuck (unless force-stopped)
+      if (!_audioForceStopped) {
+        onTTSPlaybackComplete?.call();
+      }
     }
   }
 

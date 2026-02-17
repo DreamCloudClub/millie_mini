@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../providers/providers.dart';
+import '../services/custom_face_service.dart';
 import '../services/image_cache_service.dart';
 import '../utils/constants.dart';
 
@@ -10,6 +11,7 @@ class FacePreview extends StatelessWidget {
   final FaceColor faceColor;
   final EyeShape eyeShape;
   final String? faceImageId;
+  final String? customFaceId;
   final double size;
   final bool showBackground;
 
@@ -18,19 +20,69 @@ class FacePreview extends StatelessWidget {
     required this.faceColor,
     required this.eyeShape,
     this.faceImageId,
+    this.customFaceId,
     this.size = 120,
     this.showBackground = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    // If faceImageId is set, display the face image
+    // If customFaceId is set, display the custom face image from local storage
+    if (customFaceId != null) {
+      return _buildCustomFacePreview();
+    }
+
+    // If faceImageId is set, display the animal face image
     if (faceImageId != null) {
       return _buildFaceImagePreview(context);
     }
 
     // Default robot face
     return _buildRobotFace();
+  }
+
+  Widget _buildCustomFacePreview() {
+    return FutureBuilder<String?>(
+      future: CustomFaceService.getLocalPath(customFaceId!),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: showBackground ? AppColors.faceBackground : Colors.transparent,
+              borderRadius: BorderRadius.circular(size * 0.08),
+            ),
+            child: const Center(
+              child: CircularProgressIndicator(color: Colors.white54),
+            ),
+          );
+        }
+
+        final localPath = snapshot.data;
+        if (localPath == null) {
+          // Fallback to robot face if custom face not found
+          return _buildRobotFace();
+        }
+
+        return Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: showBackground ? AppColors.faceBackground : Colors.transparent,
+            borderRadius: BorderRadius.circular(size * 0.08),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(size * 0.08),
+            child: Image.file(
+              File(localPath),
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _buildRobotFace(),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildFaceImagePreview(BuildContext context) {

@@ -355,7 +355,7 @@ class _GamePageContentState extends State<GamePageContent> {
           children: [
             // Fun Games - opens submenu
             _GameOptionButton(
-              icon: Icons.psychology,
+              icon: Icons.celebration,
               title: 'Fun Games',
               subtitle: 'Riddles, jokes, trivia & more',
               isSelected: false,
@@ -644,6 +644,17 @@ class _GamePageContentState extends State<GamePageContent> {
             ),
 
             const SizedBox(height: AppSpacing.lg),
+
+            _AnimalOptionCard(
+              icon: Icons.shuffle,
+              title: 'Random',
+              subtitle: 'Mix it up',
+              description: 'A mix of lessons and quizzes - sometimes learn, sometimes guess!',
+              isSelected: selectedCategory == 'animals:random',
+              onTap: () => voiceProvider.selectLessonCategory('animals:random'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
           ],
         ),
       ),
@@ -670,7 +681,8 @@ class _GamePageContentState extends State<GamePageContent> {
       return _buildLettersDisplay(context, lessonState, remainingSeconds);
     } else if (lessonState.isShapesMode) {
       return _buildShapesDisplay(context, lessonState, remainingSeconds);
-    } else if (lessonState.category == 'animals:lessons') {
+    } else if (lessonState.currentItem?.type == 'animals:lesson') {
+      // Check item type (not category) to handle animals:random mode correctly
       return _buildAnimalsLessonDisplay(context, lessonState);
     } else if (lessonState.isAnimalsMode) {
       return _buildAnimalsQuizDisplay(context, lessonState, remainingSeconds);
@@ -731,6 +743,8 @@ class _GamePageContentState extends State<GamePageContent> {
         return ("Let's learn about animals!", "I'll show you an animal and describe it.");
       case 'animals:lessons':
         return ("Let's learn about animals!", "I'll show you animals and tell you fun facts.");
+      case 'animals:random':
+        return ("Let's explore animals!", "Sometimes I'll quiz you, sometimes I'll teach you.");
       default:
         return ("Let's play!", "I'll ask you some questions.");
     }

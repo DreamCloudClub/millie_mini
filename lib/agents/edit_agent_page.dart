@@ -3,9 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/providers.dart';
 import '../models/models.dart';
+import '../models/custom_face.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
 import '../services/image_cache_service.dart';
+import '../services/custom_face_service.dart';
+import 'face_generator_page.dart';
+
+/// Face type options
+enum FaceType { robot, animal, custom }
 
 class EditAgentPage extends StatefulWidget {
   final String? agentId;
@@ -32,11 +38,15 @@ class _EditAgentPageState extends State<EditAgentPage> {
   FaceColor _faceColor = FaceColor.white;
   EyeShape _eyeShape = EyeShape.roundedSquares;
   String? _faceImageId;
-  bool _useAnimalFace = false;
+  String? _customFaceId;
+  FaceType _faceType = FaceType.robot;
+  bool _isEditingCustomFaces = false;
+  List<CustomFace> _customFaces = [];
   String? _aiServiceId;
   String _voice = 'Alloy';
   String _personalityId = 'default_home';
   String _introMessage = 'Hello {username}, it\'s me {agent_name} your personal AI Agent. How can I help you?';
+  bool _showFaceGenerator = false;
 
   bool get isNewAgent => widget.agentId == null;
 
@@ -45,7 +55,17 @@ class _EditAgentPageState extends State<EditAgentPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadAgent();
+      _loadCustomFaces();
     });
+  }
+
+  Future<void> _loadCustomFaces() async {
+    final faces = await CustomFaceService.loadAll();
+    if (mounted) {
+      setState(() {
+        _customFaces = faces;
+      });
+    }
   }
 
   void _loadAgent() {
@@ -58,7 +78,15 @@ class _EditAgentPageState extends State<EditAgentPage> {
           _faceColor = agent.faceColor;
           _eyeShape = agent.eyeShape;
           _faceImageId = agent.faceImageId;
-          _useAnimalFace = agent.faceImageId != null;
+          _customFaceId = agent.customFaceId;
+          // Determine face type based on which ID is set
+          if (agent.customFaceId != null) {
+            _faceType = FaceType.custom;
+          } else if (agent.faceImageId != null) {
+            _faceType = FaceType.animal;
+          } else {
+            _faceType = FaceType.robot;
+          }
           _aiServiceId = agent.aiServiceId;
           _voice = agent.voice;
           _personalityId = agent.personalityId;
@@ -86,12 +114,34 @@ class _EditAgentPageState extends State<EditAgentPage> {
 
     final agentProvider = context.read<AgentProvider>();
 
+    // Determine which face IDs to save based on face type
+    String? faceImageId;
+    String? customFaceId;
+    bool clearFaceImageId = false;
+    bool clearCustomFaceId = false;
+
+    switch (_faceType) {
+      case FaceType.robot:
+        clearFaceImageId = true;
+        clearCustomFaceId = true;
+        break;
+      case FaceType.animal:
+        faceImageId = _faceImageId;
+        clearCustomFaceId = true;
+        break;
+      case FaceType.custom:
+        customFaceId = _customFaceId;
+        clearFaceImageId = true;
+        break;
+    }
+
     if (isNewAgent) {
       await agentProvider.createAgent(
         name: _nameController.text.trim(),
         faceColor: _faceColor,
         eyeShape: _eyeShape,
-        faceImageId: _useAnimalFace ? _faceImageId : null,
+        faceImageId: faceImageId,
+        customFaceId: customFaceId,
         aiServiceId: _aiServiceId ?? 'dream_cloud_default',
         voice: _voice,
         personalityId: _personalityId,
@@ -103,8 +153,10 @@ class _EditAgentPageState extends State<EditAgentPage> {
         name: _nameController.text.trim(),
         faceColor: _faceColor,
         eyeShape: _eyeShape,
-        faceImageId: _useAnimalFace ? _faceImageId : null,
-        clearFaceImageId: !_useAnimalFace,
+        faceImageId: faceImageId,
+        clearFaceImageId: clearFaceImageId,
+        customFaceId: customFaceId,
+        clearCustomFaceId: clearCustomFaceId,
         aiServiceId: _aiServiceId,
         voice: _voice,
         personalityId: _personalityId,
@@ -114,6 +166,30 @@ class _EditAgentPageState extends State<EditAgentPage> {
 
     if (mounted) {
       widget.onSaved();
+    }
+  }
+
+  Future<void> _handleDeleteCustomFace(String id) async {
+    final confirmed = await ConfirmDialog.show(
+      context,
+      title: 'Delete Custom Face',
+      message: 'This will permanently delete this custom face. This cannot be undone.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      confirmColor: AppColors.primaryOrange,
+    );
+
+    if (confirmed == true) {
+      final success = await CustomFaceService.deleteFace(id);
+      if (success && mounted) {
+        setState(() {
+          _customFaces.removeWhere((f) => f.id == id);
+          if (_customFaceId == id) {
+            _customFaceId = null;
+          }
+        });
+      }
     }
   }
 
@@ -144,6 +220,24 @@ class _EditAgentPageState extends State<EditAgentPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Show face generator page if active
+    if (_showFaceGenerator) {
+      return FaceGeneratorPage(
+        onBack: () {
+          setState(() {
+            _showFaceGenerator = false;
+          });
+        },
+        onFaceSaved: (face) {
+          setState(() {
+            _showFaceGenerator = false;
+            _customFaces.add(face);
+            _customFaceId = face.id;
+          });
+        },
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
@@ -184,7 +278,8 @@ class _EditAgentPageState extends State<EditAgentPage> {
                 child: FacePreview(
                   faceColor: _faceColor,
                   eyeShape: _eyeShape,
-                  faceImageId: _useAnimalFace ? _faceImageId : null,
+                  faceImageId: _faceType == FaceType.animal ? _faceImageId : null,
+                  customFaceId: _faceType == FaceType.custom ? _customFaceId : null,
                   size: 160,
                 ),
               ),
@@ -207,11 +302,12 @@ class _EditAgentPageState extends State<EditAgentPage> {
                     children: [
                       Expanded(
                         child: _FaceTypeButton(
-                          label: 'Robot Face',
-                          isSelected: !_useAnimalFace,
+                          label: 'Robot',
+                          isSelected: _faceType == FaceType.robot,
                           onTap: () {
                             setState(() {
-                              _useAnimalFace = false;
+                              _faceType = FaceType.robot;
+                              _isEditingCustomFaces = false;
                             });
                           },
                         ),
@@ -219,18 +315,32 @@ class _EditAgentPageState extends State<EditAgentPage> {
                       const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: _FaceTypeButton(
-                          label: 'Animal Face',
-                          isSelected: _useAnimalFace,
+                          label: 'Animal',
+                          isSelected: _faceType == FaceType.animal,
                           onTap: () {
                             setState(() {
-                              _useAnimalFace = true;
+                              _faceType = FaceType.animal;
+                              _isEditingCustomFaces = false;
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _FaceTypeButton(
+                          label: 'Custom',
+                          isSelected: _faceType == FaceType.custom,
+                          onTap: () {
+                            setState(() {
+                              _faceType = FaceType.custom;
                             });
                           },
                         ),
                       ),
                     ],
                   ),
-                  if (_useAnimalFace) ...[
+                  // Animal faces grid
+                  if (_faceType == FaceType.animal) ...[
                     const SizedBox(height: AppSpacing.md),
                     Consumer<FaceImageProvider>(
                       builder: (context, faceImageProvider, _) {
@@ -253,6 +363,60 @@ class _EditAgentPageState extends State<EditAgentPage> {
                           },
                         );
                       },
+                    ),
+                  ],
+                  // Custom faces grid
+                  if (_faceType == FaceType.custom) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _CustomFaceGrid(
+                      customFaces: _customFaces,
+                      selectedId: _customFaceId,
+                      isEditing: _isEditingCustomFaces,
+                      onSelect: (id) {
+                        setState(() {
+                          _customFaceId = id;
+                        });
+                      },
+                      onAdd: () {
+                        setState(() {
+                          _showFaceGenerator = true;
+                        });
+                      },
+                      onDelete: (id) => _handleDeleteCustomFace(id),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    // Edit button
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setState(() {
+                            _isEditingCustomFaces = !_isEditingCustomFaces;
+                          });
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.dreamCloudBlue,
+                          side: const BorderSide(
+                            color: AppColors.dreamCloudBlue,
+                            width: 1.5,
+                          ),
+                          backgroundColor: Colors.transparent,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                            vertical: AppSpacing.sm,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        child: Text(
+                          _isEditingCustomFaces ? 'Done' : 'Edit Faces',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ],
@@ -303,7 +467,7 @@ class _EditAgentPageState extends State<EditAgentPage> {
                   const SizedBox(height: AppSpacing.md),
 
                   // Face Color (only show for robot face)
-                  if (!_useAnimalFace) ...[
+                  if (_faceType == FaceType.robot) ...[
                     AppDropdown<FaceColor>(
                       label: 'Face Color',
                       value: _faceColor,
@@ -678,6 +842,146 @@ class _FaceImageGrid extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _CustomFaceGrid extends StatelessWidget {
+  final List<CustomFace> customFaces;
+  final String? selectedId;
+  final bool isEditing;
+  final void Function(String) onSelect;
+  final VoidCallback onAdd;
+  final void Function(String) onDelete;
+
+  const _CustomFaceGrid({
+    required this.customFaces,
+    required this.selectedId,
+    required this.isEditing,
+    required this.onSelect,
+    required this.onAdd,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Include add card as first item
+    final itemCount = customFaces.length + 1;
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        crossAxisSpacing: AppSpacing.sm,
+        mainAxisSpacing: AppSpacing.sm,
+        childAspectRatio: 1,
+      ),
+      itemCount: itemCount,
+      itemBuilder: (context, index) {
+        // First item is the "Add" card
+        if (index == 0) {
+          return GestureDetector(
+            onTap: onAdd,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(AppBorderRadius.small),
+                border: Border.all(
+                  color: AppColors.divider,
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.add,
+                    size: 28,
+                    color: Colors.grey.shade600,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Add',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // Custom face items
+        final face = customFaces[index - 1];
+        final isSelected = face.id == selectedId;
+
+        return GestureDetector(
+          onTap: isEditing ? null : () => onSelect(face.id),
+          child: Stack(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.faceBackground,
+                  borderRadius: BorderRadius.circular(AppBorderRadius.small),
+                  border: Border.all(
+                    color: isSelected ? AppColors.dreamCloudBlue : AppColors.divider,
+                    width: isSelected ? 3 : 1,
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppBorderRadius.small - 2),
+                  child: Image.file(
+                    File(face.localPath),
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                    height: double.infinity,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: Colors.grey.shade300,
+                      child: const Center(
+                        child: Icon(Icons.face, color: Colors.white, size: 32),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // Delete button (only in edit mode)
+              if (isEditing)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: () => onDelete(face.id),
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      child: Center(
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryOrange,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.3),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            Icons.close,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
