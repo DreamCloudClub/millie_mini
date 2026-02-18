@@ -89,8 +89,14 @@ class Conversation {
   }
 
   /// Get messages in LLM API format
-  List<Map<String, String>> toLLMMessages() {
-    return messages.map((m) => m.toLLMFormat()).toList();
+  /// Limits to last [maxMessages] to control token usage
+  /// Default is 10 messages (5 exchanges) which is ~1000-2000 tokens
+  List<Map<String, String>> toLLMMessages({int maxMessages = 10}) {
+    // Take the last N messages to limit token usage
+    final recentMessages = messages.length > maxMessages
+        ? messages.sublist(messages.length - maxMessages)
+        : messages;
+    return recentMessages.map((m) => m.toLLMFormat()).toList();
   }
 
   factory Conversation.start(String agentId) {

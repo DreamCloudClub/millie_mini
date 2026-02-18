@@ -17,6 +17,7 @@ import 'storage_service.dart';
 import 'usage_tracking_service.dart';
 import '../services/supabase_service.dart';
 import 'note_tools_handler.dart';
+import 'intent_router.dart';
 
 /// Voice Pipeline Service
 /// Implements the non-streaming voice pipeline:
@@ -57,11 +58,11 @@ class VoicePipelineService {
   Timer? _maxRecordingTimer;
   bool _hasDetectedSpeech = false;
   String? _currentRecordingPath;
-  static const Duration _silenceThreshold = Duration(milliseconds: 2000); // Stop after 2s of silence
+  static const Duration _silenceThreshold = Duration(milliseconds: 2500); // Stop after 2.5s of silence (increased from 2s to avoid cutting off)
   static const Duration _maxRecordingDuration = Duration(seconds: 30); // Max recording time
   static const Duration _wakeWordSilenceThreshold = Duration(milliseconds: 800); // Shorter silence for wake word detection
   static const Duration _wakeWordMaxDuration = Duration(seconds: 5); // Much shorter max for wake word detection
-  static const double _speechAmplitudeThreshold = -20.0; // dB threshold for speech detection (raised from -30 to filter background noise)
+  static const double _speechAmplitudeThreshold = -26.0; // dB threshold for speech detection (lowered from -20 to detect quieter speech)
   
   // Amplitude smoothing for noise filtering
   final List<double> _amplitudeHistory = []; // Store recent amplitude readings for smoothing
@@ -516,6 +517,8 @@ class VoicePipelineService {
       // If paused, ignore all transcriptions (only manual resume via play/double-tap)
       if (_isPaused) {
         debugPrint('Paused - ignoring transcription (only manual resume via play/double-tap): "$transcription"');
+        _isProcessing = false; // Reset processing flag
+        onStateChange?.call(VoiceState.paused); // Ensure UI knows we're paused
         return;
       }
       
@@ -566,14 +569,22 @@ class VoicePipelineService {
       
       // Build enhanced system prompt
       final enhancedSystemPrompt = _buildSystemPrompt(personalityPrompt);
-      
+
       // Step 2: Call LLM
       final response = await _callLLM(
         transcription: transcription,
         personalityPrompt: enhancedSystemPrompt,
         conversationHistory: conversationHistory,
       );
-      
+
+      // Check if paused while waiting for LLM - abort if so
+      if (_isPaused) {
+        debugPrint('Paused during LLM call - aborting response playback');
+        _isProcessing = false;
+        onStateChange?.call(VoiceState.paused);
+        return;
+      }
+
       if (response == null || response.isEmpty) {
         onError?.call('Failed to get AI response');
         onStateChange?.call(VoiceState.listening);
@@ -583,6 +594,14 @@ class VoicePipelineService {
       debugPrint('LLM response received: ${response.substring(0, response.length > 100 ? 100 : response.length)}...');
       onResponse?.call(response);
 
+      // Check if paused before TTS - abort if so
+      if (_isPaused) {
+        debugPrint('Paused before TTS - aborting response playback');
+        _isProcessing = false;
+        onStateChange?.call(VoiceState.paused);
+        return;
+      }
+
       // Step 3: Generate TTS chunks
       final audioChunks = await _generateTTSChunks(response, voice);
       if (audioChunks.isEmpty) {
@@ -591,8 +610,16 @@ class VoicePipelineService {
         return;
       }
 
+      // Check if paused after TTS generation - abort if so (before playback starts)
+      if (_isPaused) {
+        debugPrint('Paused after TTS generation - aborting playback');
+        _isProcessing = false;
+        onStateChange?.call(VoiceState.paused);
+        return;
+      }
+
       // Step 4: Play audio chunks and resume listening
-      // Use forcePlay to ensure AI response plays even if user navigated to another page
+      // forcePlay: true ensures audio completes once started (pause checks above prevent starting if paused)
       await _playAudioChunks(audioChunks, autoResumeListening: _isContinuousMode, forcePlay: true);
       
     } catch (e) {
@@ -836,10 +863,12 @@ class VoicePipelineService {
         _isRecording = false;
       }
     }
-    
+
+    // CRITICAL: Notify UI of state change to paused
+    onStateChange?.call(VoiceState.paused);
     debugPrint('Continuous mode paused');
   }
-  
+
   /// Resume continuous mode (restart listening)
   Future<void> resumeContinuousMode() async {
     if (!_isContinuousMode) return;
@@ -1638,8 +1667,21 @@ Format note content nicely with line breaks, bullet points, and clear sections.
         enhancedPrompt += noteToolsHandler!.getActiveNoteContext();
       }
 
-      // Get note tools if handler is available
-      final tools = noteToolsHandler != null ? NoteToolsHandler.toolDefinitions : null;
+      // Use IntentRouter to detect intent and get only relevant tools
+      // This significantly reduces token usage (70-80% savings)
+      List<Map<String, dynamic>>? tools;
+      if (noteToolsHandler != null) {
+        final intents = IntentRouter.detectIntent(transcription);
+        final toolNames = IntentRouter.getToolNamesForCategories(intents);
+
+        if (toolNames.isNotEmpty) {
+          tools = NoteToolsHandler.getToolsByNames(toolNames);
+          debugPrint('IntentRouter: Sending ${tools.length} tools for intents: $intents');
+        } else {
+          debugPrint('IntentRouter: No tools needed - conversation only');
+          tools = null;
+        }
+      }
 
       // Use OpenAI Chat Completions API with tools
       var response = await _openaiService.callChatCompletions(

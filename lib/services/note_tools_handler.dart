@@ -584,7 +584,21 @@ class NoteToolsHandler {
       },
     },
   ];
-  
+
+  /// Get tools filtered by name
+  /// Used by IntentRouter to only send relevant tools to the LLM
+  static List<Map<String, dynamic>> getToolsByNames(List<String> toolNames) {
+    if (toolNames.isEmpty) {
+      return []; // No tools needed
+    }
+
+    return toolDefinitions.where((tool) {
+      final functionDef = tool['function'] as Map<String, dynamic>?;
+      final name = functionDef?['name'] as String?;
+      return name != null && toolNames.contains(name);
+    }).toList();
+  }
+
   /// Execute a tool call and return the result
   Future<NoteToolResult> executeTool(ToolCall toolCall) async {
     debugPrint('NoteToolsHandler: Executing tool ${toolCall.name}');
