@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../providers/reminder_provider.dart';
+import 'app_launcher_service.dart';
 import 'notes_service.dart';
 import 'openai_service.dart';
 import 'weather_service.dart';
@@ -560,6 +561,28 @@ class NoteToolsHandler {
         },
       },
     },
+    // ===== APP LAUNCHER TOOL =====
+    {
+      'type': 'function',
+      'function': {
+        'name': 'open_app',
+        'description': 'Open an app or website, optionally with a search query. Use when user wants to open an app or search within an app. Examples: "open YouTube" -> app_name="YouTube". "Open cat videos on YouTube" -> app_name="YouTube", search_query="cat videos". "Search for pizza on Google Maps" -> app_name="Google Maps", search_query="pizza". "Play Taylor Swift on Spotify" -> app_name="Spotify", search_query="Taylor Swift".',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'app_name': {
+              'type': 'string',
+              'description': 'The app to open (YouTube, Spotify, Google Maps, Netflix, Instagram, etc.)',
+            },
+            'search_query': {
+              'type': 'string',
+              'description': 'What to search for within the app. Extract from phrases like "cat videos on YouTube" or "pizza near me on Maps"',
+            },
+          },
+          'required': ['app_name'],
+        },
+      },
+    },
   ];
   
   /// Execute a tool call and return the result
@@ -617,6 +640,9 @@ class NoteToolsHandler {
         return await _getForecast(toolCall.arguments);
       case 'get_air_quality':
         return await _getAirQuality(toolCall.arguments);
+      // App launcher
+      case 'open_app':
+        return await _openApp(toolCall.arguments);
       default:
         return AIToolResult(
           success: false,
@@ -1625,6 +1651,39 @@ class NoteToolsHandler {
     }
   }
 
+  /// Open an app or website
+  Future<AIToolResult> _openApp(Map<String, dynamic> args) async {
+    final appName = args['app_name'] as String?;
+    final searchQuery = args['search_query'] as String?;
+
+    if (appName == null || appName.isEmpty) {
+      return AIToolResult(
+        success: false,
+        message: 'Please specify which app to open.',
+      );
+    }
+
+    debugPrint('NoteToolsHandler: Opening app "$appName" with query: $searchQuery');
+
+    try {
+      final result = await AppLauncherService.launchApp(
+        appName,
+        searchQuery: searchQuery,
+      );
+
+      return AIToolResult(
+        success: result.success,
+        message: result.message,
+      );
+    } catch (e) {
+      debugPrint('Error opening app: $e');
+      return AIToolResult(
+        success: false,
+        message: 'Error opening $appName: $e',
+      );
+    }
+  }
+
   /// Helper to format time for display
   String _formatTime(DateTime dt) {
     final hour = dt.hour;
@@ -1709,6 +1768,16 @@ GAMES:
 PAUSE:
 - "pause", "stop", "hold on", "wait", "be quiet", "stop listening" → use pause_conversation
 - After pausing, the user can resume by tapping play or double-tapping the screen
+
+APP LAUNCHER - When users say things like:
+- "open YouTube" → use open_app with app_name="YouTube"
+- "open cat videos on YouTube" → use open_app with app_name="YouTube", search_query="cat videos"
+- "search for pizza on Google Maps" → use open_app with app_name="Google Maps", search_query="pizza"
+- "play Taylor Swift on Spotify" → use open_app with app_name="Spotify", search_query="Taylor Swift"
+- "show me funny memes on Reddit" → use open_app with app_name="Reddit", search_query="funny memes"
+- "look up headphones on Amazon" → use open_app with app_name="Amazon", search_query="headphones"
+- "open the camera" → use open_app with app_name="Camera"
+- "launch Netflix" → use open_app with app_name="Netflix"
 
 IMPORTANT: Don't read note content aloud unless asked. After creating notes or alerts, just confirm briefly.
 ''';
