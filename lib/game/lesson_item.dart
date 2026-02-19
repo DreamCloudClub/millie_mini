@@ -38,6 +38,9 @@ class LessonItem {
   final String? lettersPhonetic; // Phonetic pronunciation of letters for TTS
   final String? cachedAudioUrl; // Cached TTS audio URL (for animals, etc.)
   final String? imageUrl; // Image URL (for animals, shapes, etc.)
+  final String? stateId; // Two-letter state abbreviation (for geography)
+  final String? stateCapital; // State capital (for geography)
+  final String? stateRegion; // State region (for geography)
 
   const LessonItem({
     required this.id,
@@ -50,6 +53,9 @@ class LessonItem {
     this.lettersPhonetic,
     this.cachedAudioUrl,
     this.imageUrl,
+    this.stateId,
+    this.stateCapital,
+    this.stateRegion,
   });
 
   /// Get the text to speak via TTS (different from display for spelling/math)

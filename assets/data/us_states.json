@@ -1,0 +1,144 @@
+{
+  "states": [
+    {
+      "id": "CA",
+      "name": "California",
+      "capital": "Sacramento",
+      "region": "West",
+      "statehood_year": 1850,
+      "population": 39538223,
+      "nickname": "The Golden State",
+      "fun_facts": [
+        "California has the largest economy of any U.S. state.",
+        "The highest and lowest points in the continental U.S. are both in California.",
+        "California produces more than half of all the fruits, vegetables, and nuts grown in the United States."
+      ]
+    },
+    {
+      "id": "TX",
+      "name": "Texas",
+      "capital": "Austin",
+      "region": "South",
+      "statehood_year": 1845,
+      "population": 29145505,
+      "nickname": "The Lone Star State",
+      "fun_facts": [
+        "Texas is the second largest state by both area and population.",
+        "Texas was an independent country called the Republic of Texas from 1836 to 1845.",
+        "The King Ranch in Texas is bigger than the state of Rhode Island."
+      ]
+    },
+    {
+      "id": "NY",
+      "name": "New York",
+      "capital": "Albany",
+      "region": "Northeast",
+      "statehood_year": 1788,
+      "population": 20201249,
+      "nickname": "The Empire State",
+      "fun_facts": [
+        "New York City is the largest city in the United States.",
+        "The Statue of Liberty was a gift from France in 1886.",
+        "New York was one of the original 13 colonies."
+      ]
+    },
+    {
+      "id": "FL",
+      "name": "Florida",
+      "capital": "Tallahassee",
+      "region": "South",
+      "statehood_year": 1845,
+      "population": 21538187,
+      "nickname": "The Sunshine State",
+      "fun_facts": [
+        "Florida has the longest coastline in the contiguous United States.",
+        "St. Augustine, Florida is the oldest continuously occupied European settlement in the U.S.",
+        "Florida is the only state that borders both the Gulf of Mexico and the Atlantic Ocean."
+      ]
+    },
+    {
+      "id": "AZ",
+      "name": "Arizona",
+      "capital": "Phoenix",
+      "region": "West",
+      "statehood_year": 1912,
+      "population": 7151502,
+      "nickname": "The Grand Canyon State",
+      "fun_facts": [
+        "The Grand Canyon is one of the Seven Natural Wonders of the World.",
+        "Arizona receives over 300 days of sunshine per year.",
+        "The saguaro cactus only grows in the Sonoran Desert of Arizona and Mexico."
+      ]
+    },
+    {
+      "id": "WA",
+      "name": "Washington",
+      "capital": "Olympia",
+      "region": "West",
+      "statehood_year": 1889,
+      "population": 7614893,
+      "nickname": "The Evergreen State",
+      "fun_facts": [
+        "Washington is the only state named after a U.S. president.",
+        "Seattle is home to the first Starbucks coffee shop.",
+        "Washington produces more apples than any other state."
+      ]
+    },
+    {
+      "id": "CO",
+      "name": "Colorado",
+      "capital": "Denver",
+      "region": "West",
+      "statehood_year": 1876,
+      "population": 5773714,
+      "nickname": "The Centennial State",
+      "fun_facts": [
+        "Colorado has more mountains over 14,000 feet than any other state.",
+        "The U.S. Air Force Academy is located in Colorado Springs.",
+        "Colorado's nickname comes from becoming a state in 1876, the centennial of the Declaration of Independence."
+      ]
+    },
+    {
+      "id": "IL",
+      "name": "Illinois",
+      "capital": "Springfield",
+      "region": "Midwest",
+      "statehood_year": 1818,
+      "population": 12812508,
+      "nickname": "The Prairie State",
+      "fun_facts": [
+        "Chicago is the third largest city in the United States.",
+        "Abraham Lincoln lived in Illinois before becoming president.",
+        "The world's first skyscraper was built in Chicago in 1885."
+      ]
+    },
+    {
+      "id": "GA",
+      "name": "Georgia",
+      "capital": "Atlanta",
+      "region": "South",
+      "statehood_year": 1788,
+      "population": 10711908,
+      "nickname": "The Peach State",
+      "fun_facts": [
+        "Georgia is the largest state east of the Mississippi River.",
+        "Coca-Cola was invented in Atlanta in 1886.",
+        "Georgia was one of the original 13 colonies."
+      ]
+    },
+    {
+      "id": "OH",
+      "name": "Ohio",
+      "capital": "Columbus",
+      "region": "Midwest",
+      "statehood_year": 1803,
+      "population": 11799448,
+      "nickname": "The Buckeye State",
+      "fun_facts": [
+        "Ohio is called the 'Mother of Presidents' because eight U.S. presidents were born there.",
+        "The first professional baseball team, the Cincinnati Red Stockings, was from Ohio.",
+        "The Wright Brothers, who invented the airplane, were from Dayton, Ohio."
+      ]
+    }
+  ]
+}

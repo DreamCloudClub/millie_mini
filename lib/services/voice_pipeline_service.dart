@@ -1661,25 +1661,33 @@ Format note content nicely with line breaks, bullet points, and clear sections.
         debugPrint('Alternative LLM returned null, falling back to default');
       }
 
-      // Build enhanced system prompt with note context if available
-      String enhancedPrompt = personalityPrompt;
+      // Use IntentRouter to detect intent (used for both tools AND instructions)
+      // This significantly reduces token usage (60-90% savings on instructions)
+      Set<IntentCategory> intents = {IntentCategory.none};
       if (noteToolsHandler != null) {
-        enhancedPrompt += noteToolsHandler!.getActiveNoteContext();
+        intents = IntentRouter.detectIntent(transcription);
       }
 
-      // Use IntentRouter to detect intent and get only relevant tools
-      // This significantly reduces token usage (70-80% savings)
+      // Build enhanced system prompt with intent-aware context
+      String enhancedPrompt = personalityPrompt;
+      if (noteToolsHandler != null) {
+        enhancedPrompt += noteToolsHandler!.getActiveNoteContext(intents: intents);
+      }
+
+      // Get only relevant tools based on detected intents
       List<Map<String, dynamic>>? tools;
       if (noteToolsHandler != null) {
-        final intents = IntentRouter.detectIntent(transcription);
         final toolNames = IntentRouter.getToolNamesForCategories(intents);
 
         if (toolNames.isNotEmpty) {
           tools = NoteToolsHandler.getToolsByNames(toolNames);
+          // Always add request_capability as fallback
+          tools.add(NoteToolsHandler.requestCapabilityTool);
           debugPrint('IntentRouter: Sending ${tools.length} tools for intents: $intents');
         } else {
-          debugPrint('IntentRouter: No tools needed - conversation only');
-          tools = null;
+          // Even for conversation-only, include request_capability as escape hatch
+          tools = [NoteToolsHandler.requestCapabilityTool];
+          debugPrint('IntentRouter: Conversation only - just request_capability tool');
         }
       }
 
@@ -1804,27 +1812,69 @@ Format note content nicely with line breaks, bullet points, and clear sections.
     });
     
     // Execute each tool call and add results
+    String? requestedCapability;
     for (final toolCall in response.toolCalls!) {
       debugPrint('Executing tool: ${toolCall.name}');
-      
+
       final result = await noteToolsHandler!.executeTool(toolCall);
-      
+
+      // Check if this is a capability request (needs retry with expanded tools)
+      if (result.requestedCapability != null) {
+        requestedCapability = result.requestedCapability;
+        debugPrint('Capability requested: $requestedCapability - will retry with expanded tools');
+      }
+
       // Add tool result to history
       updatedHistory.add({
         'role': 'tool',
         'tool_call_id': toolCall.id,
         'content': jsonEncode(result.toJson()),
       });
-      
+
       debugPrint('Tool ${toolCall.name} result: ${result.success ? "success" : "failed"} - ${result.message}');
     }
-    
+
+    // If capability was requested, rebuild prompt and tools with the requested capability
+    String effectiveSystemPrompt = systemPrompt;
+    List<Map<String, dynamic>>? effectiveTools = tools;
+
+    if (requestedCapability != null && noteToolsHandler != null) {
+      // Map capability string to IntentCategory
+      final capabilityIntent = _mapCapabilityToIntent(requestedCapability);
+      if (capabilityIntent != null) {
+        debugPrint('Expanding tools/instructions for capability: $capabilityIntent');
+
+        // Get tools for this capability
+        final capabilityToolNames = IntentRouter.getToolNamesForCategories({capabilityIntent});
+        final capabilityTools = NoteToolsHandler.getToolsByNames(capabilityToolNames);
+
+        // Merge with existing tools (avoid duplicates)
+        final existingToolNames = (tools ?? []).map((t) =>
+          (t['function'] as Map<String, dynamic>?)?['name'] as String?
+        ).whereType<String>().toSet();
+
+        effectiveTools = [...(tools ?? [])];
+        for (final tool in capabilityTools) {
+          final toolName = (tool['function'] as Map<String, dynamic>?)?['name'];
+          if (toolName != null && !existingToolNames.contains(toolName)) {
+            effectiveTools.add(tool);
+          }
+        }
+
+        // Rebuild system prompt with the requested capability's instructions
+        // We append the new instructions to the existing prompt
+        effectiveSystemPrompt = systemPrompt + noteToolsHandler!.getActiveNoteContext(intents: {capabilityIntent});
+
+        debugPrint('Expanded to ${effectiveTools.length} tools with $capabilityIntent instructions');
+      }
+    }
+
     // Continue conversation with tool results
     final continuedResponse = await _openaiService.continueWithToolResults(
-      systemPrompt: systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       conversationHistory: updatedHistory,
       model: 'gpt-4o-mini',
-      tools: tools,
+      tools: effectiveTools,
     );
     
     if (continuedResponse == null) {
@@ -1839,14 +1889,35 @@ Format note content nicely with line breaks, bullet points, and clear sections.
         response: continuedResponse,
         conversationHistory: updatedHistory,
         userMessage: '', // Already in history
-        systemPrompt: systemPrompt,
-        tools: tools,
+        systemPrompt: effectiveSystemPrompt,
+        tools: effectiveTools,
         totalTokensUsed: totalTokensUsed + continuedResponse.totalTokens,
         depth: depth + 1,
       );
     }
-    
+
     return continuedResponse;
+  }
+
+  /// Map capability string to IntentCategory
+  IntentCategory? _mapCapabilityToIntent(String capability) {
+    switch (capability.toLowerCase()) {
+      case 'notes':
+        return IntentCategory.notes;
+      case 'schedule':
+        return IntentCategory.schedule;
+      case 'weather':
+        return IntentCategory.weather;
+      case 'apps':
+        return IntentCategory.apps;
+      case 'games':
+        return IntentCategory.games;
+      case 'navigation':
+        return IntentCategory.navigation;
+      default:
+        debugPrint('Unknown capability requested: $capability');
+        return null;
+    }
   }
 
   Future<String?> _textToSpeech(String text, String voice) async {

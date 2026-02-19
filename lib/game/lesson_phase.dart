@@ -122,7 +122,10 @@ class LessonState {
   bool get isShapesMode => currentItem?.type == 'shapes';
 
   /// Whether current question is animals mode (quiz or lesson)
-  bool get isAnimalsMode => currentItem?.type == 'animals' || currentItem?.type == 'animals:lesson' || category?.startsWith('animals') == true;
+  bool get isAnimalsMode => currentItem?.type == 'animals' || currentItem?.type == 'animals:lesson' || category.startsWith('animals');
+
+  /// Whether current question is geography mode (quiz or lesson)
+  bool get isGeographyMode => currentItem?.type == 'geography' || currentItem?.type == 'geography:lesson' || category.startsWith('geography');
 
   /// Display text showing progress
   String get progressText {

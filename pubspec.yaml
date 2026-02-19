@@ -46,6 +46,9 @@ dependencies:
   # Image Saver
   gal: ^2.3.0
 
+  # SVG Rendering (for Geography maps)
+  flutter_svg: ^2.0.10+1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -60,6 +63,10 @@ flutter:
     - assets/icon/icon.png
     - assets/icon/logo.png
     - assets/shapes/
+    - assets/data/
+    - assets/svg/
+    - assets/svg/states/
+    - assets/images/flags/
 
 # App Icon Configuration
 flutter_launcher_icons:

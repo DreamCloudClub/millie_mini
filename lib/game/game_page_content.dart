@@ -9,6 +9,7 @@ import '../face/control_bar.dart';
 import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
 import '../services/image_cache_service.dart';
+import '../geography/us_map_widget.dart';
 import 'lesson_phase.dart';
 
 /// Game display page for riddles, jokes, and interactive games
@@ -52,6 +53,7 @@ class _GamePageContentState extends State<GamePageContent> {
   bool _showMathMenu = false;
   bool _showLettersMenu = false;
   bool _showAnimalsMenu = false;
+  bool _showGeographyMenu = false;
 
   /// Track if game was running in previous frame (to detect game end)
   bool _wasGameRunning = false;
@@ -87,7 +89,7 @@ class _GamePageContentState extends State<GamePageContent> {
             // Reset submenus when returning from a game
             final isGameRunning = lessonState.isGameRunning;
             final anyMenuOpen = _showBrainGamesMenu || _showLearningMenu ||
-                _showMathMenu || _showLettersMenu || _showAnimalsMenu;
+                _showMathMenu || _showLettersMenu || _showAnimalsMenu || _showGeographyMenu;
             if (_wasGameRunning && !isGameRunning && anyMenuOpen) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) setState(() {
@@ -96,6 +98,7 @@ class _GamePageContentState extends State<GamePageContent> {
                   _showMathMenu = false;
                   _showLettersMenu = false;
                   _showAnimalsMenu = false;
+                  _showGeographyMenu = false;
                 });
               });
             }
@@ -121,6 +124,7 @@ class _GamePageContentState extends State<GamePageContent> {
                               _showMathMenu = false;
                               _showLettersMenu = false;
                               _showAnimalsMenu = false;
+                              _showGeographyMenu = false;
                             });
                             return;
                           }
@@ -131,10 +135,11 @@ class _GamePageContentState extends State<GamePageContent> {
                               _showMathMenu = false;
                               _showLettersMenu = false;
                             });
-                          } else if (_showAnimalsMenu) {
-                            // Animals goes directly to main menu
+                          } else if (_showAnimalsMenu || _showGeographyMenu) {
+                            // Animals/Geography goes directly to main menu
                             setState(() {
                               _showAnimalsMenu = false;
+                              _showGeographyMenu = false;
                               _showLearningMenu = false;
                             });
                           } else if (_showBrainGamesMenu || _showLearningMenu) {
@@ -344,6 +349,9 @@ class _GamePageContentState extends State<GamePageContent> {
       if (_showAnimalsMenu) {
         return _buildAnimalsSubMenu(context, voiceProvider, selectedCategory);
       }
+      if (_showGeographyMenu) {
+        return _buildGeographySubMenu(context, voiceProvider, selectedCategory);
+      }
       return _buildLearningSubMenu(context, voiceProvider, selectedCategory);
     }
 
@@ -533,6 +541,17 @@ class _GamePageContentState extends State<GamePageContent> {
             ),
 
             const SizedBox(height: AppSpacing.lg),
+
+            _MainMenuCard(
+              icon: Icons.public,
+              title: 'US Geography',
+              subtitle: 'Learn about U.S. states',
+              description: 'Explore the United States! Learn about each state, their capitals, and fun facts. Can you find them on the map?',
+              isSelected: selectedCategory?.startsWith('geography') ?? false,
+              onTap: () => setState(() => _showGeographyMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
           ],
         ),
       ),
@@ -693,6 +712,50 @@ class _GamePageContentState extends State<GamePageContent> {
     );
   }
 
+  Widget _buildGeographySubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _AnimalOptionCard(
+              icon: Icons.school,
+              title: 'Lessons',
+              subtitle: 'Learn about states',
+              description: 'See each state on the map and learn about its capital, region, and fun facts! Discover what makes each state special.',
+              isSelected: selectedCategory == 'geography:lessons',
+              onTap: () => voiceProvider.selectLessonCategory('geography:lessons'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _AnimalOptionCard(
+              icon: Icons.quiz,
+              title: 'Quiz',
+              subtitle: 'Test your knowledge',
+              description: 'See a state highlighted on the map and try to name it! Listen to the clues about the capital and region. How many can you get right?',
+              isSelected: selectedCategory == 'geography:quiz',
+              onTap: () => voiceProvider.selectLessonCategory('geography:quiz'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _AnimalOptionCard(
+              icon: Icons.shuffle,
+              title: 'Random',
+              subtitle: 'Mix it up',
+              description: 'A mix of lessons and quizzes! Sometimes you\'ll learn about a state, sometimes you\'ll guess which state it is. Keeps things exciting!',
+              isSelected: selectedCategory == 'geography:random',
+              onTap: () => voiceProvider.selectLessonCategory('geography:random'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLessonDisplay(BuildContext context, LessonState lessonState) {
     final voiceProvider = context.read<VoiceProvider>();
     final remainingSeconds = voiceProvider.gameController.remainingSeconds;
@@ -706,6 +769,7 @@ class _GamePageContentState extends State<GamePageContent> {
     // For letters: show just the letter in large font
     // For shapes: show the shape icon with hint
     // For animals: show the animal image with description
+    // For geography: show the state map with info
     // For others: show the full question
     if (lessonState.isSpellingMode) {
       return _buildSpellingDisplay(context, lessonState, remainingSeconds);
@@ -720,6 +784,11 @@ class _GamePageContentState extends State<GamePageContent> {
       return _buildAnimalsLessonDisplay(context, lessonState);
     } else if (lessonState.isAnimalsMode) {
       return _buildAnimalsQuizDisplay(context, lessonState, remainingSeconds);
+    } else if (lessonState.currentItem?.type == 'geography:lesson') {
+      // Check item type (not category) to handle geography:random mode correctly
+      return _buildGeographyLessonDisplay(context, lessonState);
+    } else if (lessonState.isGeographyMode) {
+      return _buildGeographyQuizDisplay(context, lessonState, remainingSeconds);
     } else {
       return _buildDefaultDisplay(context, lessonState, remainingSeconds);
     }
@@ -781,6 +850,13 @@ class _GamePageContentState extends State<GamePageContent> {
         return ("Let's learn about animals!", "I'll show you animals and tell you fun facts.");
       case 'animals:random':
         return ("Let's explore animals!", "Sometimes I'll quiz you, sometimes I'll teach you.");
+      case 'geography':
+      case 'geography:quiz':
+        return ("Let's learn U.S. states!", "I'll show you a state and give you clues.");
+      case 'geography:lessons':
+        return ("Let's learn U.S. states!", "I'll show you each state and tell you about it.");
+      case 'geography:random':
+        return ("Let's explore U.S. geography!", "Sometimes I'll quiz you, sometimes I'll teach you.");
       default:
         return ("Let's play!", "I'll ask you some questions.");
     }
@@ -1286,6 +1362,129 @@ class _GamePageContentState extends State<GamePageContent> {
               fontSize: promptFontSize,
               fontWeight: FontWeight.w500,
               color: Colors.white.withOpacity(0.9),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Timer during LISTEN phase, Answer during FEEDBACK phase
+          _buildTimerOrAnswer(context, lessonState),
+        ],
+      ),
+    );
+  }
+
+  /// Geography Lesson display - US map with highlighted state, name, then description
+  Widget _buildGeographyLessonDisplay(BuildContext context, LessonState lessonState) {
+    final description = lessonState.displayQuestion;
+    final stateName = lessonState.displayAnswer;
+    final stateId = lessonState.currentItem?.stateId ?? '';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // US Map with highlighted state
+          Center(
+            child: SizedBox(
+              width: double.infinity,
+              child: USMapWidget(
+                highlightedStateId: stateId,
+                highlightColor: const Color(0xFFFF9800), // Orange
+                highlightBorderColor: const Color(0xFFE65100), // Dark orange
+                stateColor: const Color(0xFF424242), // Dark grey
+                stateBorderColor: const Color(0xFF616161), // Medium grey
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // State name under map
+          Text(
+            stateName,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.md),
+
+          // Description under name
+          Text(
+            description,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 20,
+              color: Colors.white.withOpacity(0.9),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Geography Quiz display - US map with highlighted state (no name shown)
+  Widget _buildGeographyQuizDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
+    final stateId = lessonState.currentItem?.stateId ?? '';
+    final hint = lessonState.displayQuestion;
+
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    final promptFontSize = isLarge ? 28.0 : 22.0;
+    final progressFontSize = isLarge ? 22.0 : 16.0;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Progress indicator
+          if (lessonState.questionCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: Text(
+                lessonState.progressText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: progressFontSize,
+                  color: Colors.white.withOpacity(0.6),
+                ),
+              ),
+            ),
+
+          // US Map with highlighted state (orange on grey)
+          Center(
+            child: SizedBox(
+              width: double.infinity,
+              child: USMapWidget(
+                highlightedStateId: stateId,
+                highlightColor: const Color(0xFFFF9800), // Orange
+                highlightBorderColor: const Color(0xFFE65100), // Dark orange
+                stateColor: const Color(0xFF424242), // Dark grey
+                stateBorderColor: const Color(0xFF616161), // Medium grey
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Hint/clue text (doesn't reveal the state name)
+          Text(
+            hint,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: promptFontSize,
+              color: Colors.white.withOpacity(0.9),
+              height: 1.4,
             ),
           ),
 

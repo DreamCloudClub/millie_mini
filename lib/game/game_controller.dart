@@ -13,6 +13,7 @@ import '../services/letters_service.dart';
 import '../services/numbers_service.dart';
 import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
+import '../services/geography_service.dart';
 import '../providers/custom_quiz_provider.dart';
 
 /// Callback type for TTS playback
@@ -754,6 +755,21 @@ class GameController extends ChangeNotifier {
       return _getNextAnimalRandom();
     }
 
+    // Geography (US States) quiz
+    if (category == 'geography' || category == 'geography:quiz') {
+      return _getNextGeography();
+    }
+
+    // Geography (US States) lessons (auto-play, no voice input)
+    if (category == 'geography:lessons') {
+      return _getNextGeographyLesson();
+    }
+
+    // Geography random - mix of quiz and lessons
+    if (category == 'geography:random') {
+      return _getNextGeographyRandom();
+    }
+
     // Spelling uses its own table/service
     if (category == 'spelling') {
       return _getNextSpellingWord();
@@ -1104,6 +1120,70 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  /// Get next geography (US state) quiz from local JSON
+  Future<LessonItem?> _getNextGeography() async {
+    final problem = await GeographyService.generate(excludeIds: _askedItemIds);
+
+    if (problem == null) {
+      return null; // All states shown
+    }
+
+    await GeographyService.markAsUsed(problem.id);
+
+    return LessonItem(
+      id: problem.id,
+      type: 'geography',
+      prompt: problem.hint, // Quiz hint without revealing the name
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.flexible,
+      stateId: problem.stateId,
+      stateCapital: problem.capital,
+      stateRegion: problem.region,
+    );
+  }
+
+  /// Get next geography lesson (auto-play, no voice input)
+  Future<LessonItem?> _getNextGeographyLesson() async {
+    final problem = await GeographyService.generateLesson(excludeIds: _askedItemIds);
+
+    if (problem == null) {
+      return null; // All states shown
+    }
+
+    await GeographyService.markAsUsed(problem.id);
+
+    return LessonItem(
+      id: problem.id,
+      type: 'geography:lesson',
+      prompt: problem.hint, // Full narration with "Can you say [state]?"
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.none, // No grading for lessons
+      stateId: problem.stateId,
+      stateCapital: problem.capital,
+      stateRegion: problem.region,
+    );
+  }
+
+  /// Get next geography - randomly picks between quiz and lesson
+  Future<LessonItem?> _getNextGeographyRandom() async {
+    // Randomly pick between quiz (0) and lesson (1)
+    final isLesson = Random().nextBool();
+
+    if (isLesson) {
+      final item = await _getNextGeographyLesson();
+      if (item != null) return item;
+      // Fall back to quiz if no lessons available
+      return _getNextGeography();
+    } else {
+      final item = await _getNextGeography();
+      if (item != null) return item;
+      // Fall back to lesson if no quiz available
+      return _getNextGeographyLesson();
+    }
+  }
+
   /// Get next item from a custom quiz (randomly picks from its categories)
   /// Shuffles categories and tries each until one returns an item
   Future<LessonItem?> _getNextFromCustomQuiz(String quizId) async {
@@ -1145,6 +1225,8 @@ class GameController extends ChangeNotifier {
         item = await _getNextShape();
       } else if (category == 'animals' || category == 'animals:quiz') {
         item = await _getNextAnimal();
+      } else if (category == 'geography' || category == 'geography:quiz') {
+        item = await _getNextGeography();
       }
 
       if (item != null) {
@@ -1216,6 +1298,13 @@ class GameController extends ChangeNotifier {
         return "Let's learn about animals! I'll show you an animal and tell you all about it.";
       case 'animals:random':
         return "Let's explore animals! Sometimes I'll quiz you, and sometimes I'll teach you something new.";
+      case 'geography':
+      case 'geography:quiz':
+        return "Let's learn about U.S. states! I'll show you a state on the map and give you some clues. Can you guess which state it is?";
+      case 'geography:lessons':
+        return "Let's learn about U.S. states! I'll show you each state and tell you about it.";
+      case 'geography:random':
+        return "Let's explore U.S. geography! Sometimes I'll quiz you, and sometimes I'll teach you something new.";
       default:
         return "Let's play! I'll ask you some questions.";
     }

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../providers/reminder_provider.dart';
 import 'app_launcher_service.dart';
+import 'intent_router.dart';
 import 'notes_service.dart';
 import 'openai_service.dart';
 import 'weather_service.dart';
@@ -14,7 +15,9 @@ class AIToolResult {
   final List<Note>? notes;
   final Reminder? alert;
   final List<Reminder>? alerts;
-  
+  /// If set, indicates the LLM needs this capability and we should retry with it
+  final String? requestedCapability;
+
   AIToolResult({
     required this.success,
     required this.message,
@@ -22,6 +25,7 @@ class AIToolResult {
     this.notes,
     this.alert,
     this.alerts,
+    this.requestedCapability,
   });
   
   /// Convert to JSON for tool response
@@ -583,6 +587,25 @@ class NoteToolsHandler {
         },
       },
     },
+    // ===== CAPABILITY REQUEST TOOL (always available) =====
+    {
+      'type': 'function',
+      'function': {
+        'name': 'request_capability',
+        'description': 'Call this ONLY if the user wants something you can do (based on your capabilities) but you don\'t have the right tool available. This will provide you with the necessary tools.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'capability': {
+              'type': 'string',
+              'enum': ['notes', 'schedule', 'weather', 'apps', 'games', 'navigation'],
+              'description': 'The capability needed: notes (save/manage notes), schedule (alerts/reminders), weather (forecasts), apps (open external apps), games (play games), navigation (app navigation)',
+            },
+          },
+          'required': ['capability'],
+        },
+      },
+    },
   ];
 
   /// Get tools filtered by name
@@ -597,6 +620,14 @@ class NoteToolsHandler {
       final name = functionDef?['name'] as String?;
       return name != null && toolNames.contains(name);
     }).toList();
+  }
+
+  /// Get the request_capability tool (always included as fallback)
+  static Map<String, dynamic> get requestCapabilityTool {
+    return toolDefinitions.firstWhere((tool) {
+      final functionDef = tool['function'] as Map<String, dynamic>?;
+      return functionDef?['name'] == 'request_capability';
+    });
   }
 
   /// Execute a tool call and return the result
@@ -657,6 +688,9 @@ class NoteToolsHandler {
       // App launcher
       case 'open_app':
         return await _openApp(toolCall.arguments);
+      // Capability request (triggers retry with requested tools)
+      case 'request_capability':
+        return _requestCapability(toolCall.arguments);
       default:
         return AIToolResult(
           success: false,
@@ -1032,8 +1066,11 @@ class NoteToolsHandler {
 
   /// Navigate to the games page
   NoteToolResult _showGames() {
-    // Just navigate to game page - user taps a category button to start
+    // Navigate to game page - user taps a category button to start
     onNavigate?.call(AINavigationTarget.game);
+
+    // Pause after response plays - manual selection until game starts
+    _shouldPauseAfterResponse = true;
 
     return NoteToolResult(
       success: true,
@@ -1698,6 +1735,27 @@ class NoteToolsHandler {
     }
   }
 
+  /// Handle capability request - signals that we need to retry with additional tools
+  AIToolResult _requestCapability(Map<String, dynamic> args) {
+    final capability = args['capability'] as String?;
+
+    if (capability == null || capability.isEmpty) {
+      return AIToolResult(
+        success: false,
+        message: 'Please specify which capability you need.',
+      );
+    }
+
+    debugPrint('NoteToolsHandler: Capability requested: $capability');
+
+    // Return special result that signals retry is needed
+    return AIToolResult(
+      success: true,
+      message: 'Loading $capability tools...',
+      requestedCapability: capability,
+    );
+  }
+
   /// Helper to format time for display
   String _formatTime(DateTime dt) {
     final hour = dt.hour;
@@ -1726,89 +1784,136 @@ class NoteToolsHandler {
   }
   
   /// Get context about the active note to include in the system prompt
-  String getActiveNoteContext() {
-    // Include current date/time so AI can calculate "tomorrow", "next week", etc.
+  /// Now intent-aware: only includes detailed instructions for detected intents
+  String getActiveNoteContext({Set<IntentCategory>? intents}) {
+    final buffer = StringBuffer();
+
+    // === ALWAYS INCLUDED: Date/time ===
     final now = DateTime.now();
     final currentDate = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     final currentTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     final weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     final currentWeekday = weekdays[now.weekday - 1];
-    
-    final instructions = '''
 
-CURRENT DATE/TIME: $currentWeekday, $currentDate at $currentTime
-Use this to calculate dates like "tomorrow", "next Monday", "in 2 hours", etc.
+    buffer.writeln();
+    buffer.writeln('CURRENT DATE/TIME: $currentWeekday, $currentDate at $currentTime');
 
-NAVIGATION, NOTES & SCHEDULE CAPABILITIES:
-You can navigate the app, manage notes, and handle the schedule with alerts naturally.
+    // === ALWAYS INCLUDED: Capabilities summary ===
+    buffer.writeln();
+    buffer.writeln('YOUR CAPABILITIES: You can manage notes, set schedule alerts, check weather, open external apps, play games, and navigate the app.');
+    buffer.writeln('If you need to do something but don\'t have the right tool, use request_capability to get it.');
 
-NOTES - When users say things like:
-- "show me the shopping list" → use show_note to display it
+    // === ALWAYS INCLUDED: Active note context (if present) ===
+    if (_activeNote != null) {
+      buffer.writeln();
+      buffer.writeln('CURRENTLY ACTIVE NOTE:');
+      buffer.writeln('Title: "${_activeNote!.title}"');
+      buffer.writeln('Content:');
+      buffer.writeln(_activeNote!.content);
+      buffer.writeln();
+      buffer.writeln('(The user is viewing this note. You can reference, update, or append to it. Only read content aloud if asked.)');
+    }
+
+    // === CONDITIONAL: Detailed instructions based on detected intents ===
+    final activeIntents = intents ?? {IntentCategory.none};
+
+    // Notes instructions
+    if (activeIntents.contains(IntentCategory.notes)) {
+      buffer.writeln();
+      buffer.writeln(_getNotesInstructions());
+    }
+
+    // Schedule instructions
+    if (activeIntents.contains(IntentCategory.schedule)) {
+      buffer.writeln();
+      buffer.writeln(_getScheduleInstructions());
+    }
+
+    // Weather instructions
+    if (activeIntents.contains(IntentCategory.weather)) {
+      buffer.writeln();
+      buffer.writeln(_getWeatherInstructions());
+    }
+
+    // Apps instructions
+    if (activeIntents.contains(IntentCategory.apps)) {
+      buffer.writeln();
+      buffer.writeln(_getAppsInstructions());
+    }
+
+    // Games instructions
+    if (activeIntents.contains(IntentCategory.games)) {
+      buffer.writeln();
+      buffer.writeln(_getGamesInstructions());
+    }
+
+    // Navigation instructions
+    if (activeIntents.contains(IntentCategory.navigation)) {
+      buffer.writeln();
+      buffer.writeln(_getNavigationInstructions());
+    }
+
+    // General reminder (always)
+    buffer.writeln();
+    buffer.writeln('IMPORTANT: Don\'t read note content aloud unless asked. After creating notes or alerts, just confirm briefly.');
+
+    return buffer.toString();
+  }
+
+  // === CATEGORY-SPECIFIC INSTRUCTION BLOCKS ===
+
+  String _getNotesInstructions() {
+    return '''NOTES TOOLS:
+- "show me the shopping list" → use show_note with search_title
 - "make a note about this" → use create_note
 - "add eggs to the shopping list" → use append_to_note with search_title="shopping list"
 - "update my recipe" → use update_note with search_title="recipe"
 - "show me my notes" → use show_notes_list
+IMPORTANT: Use search_title to find notes by name. Don't say you can't update if no note is open.''';
+  }
 
-IMPORTANT: When updating or appending to a note by name, use the search_title parameter to find it first. Don't say you can't update if no note is open - use search_title to find and update it.
-
-SCHEDULE/ALERTS - When users say things like:
-- "remind me to call mom tomorrow at 3pm" → calculate tomorrow's date and use create_alert
+  String _getScheduleInstructions() {
+    return '''SCHEDULE/ALERT TOOLS:
+- "remind me to call mom tomorrow at 3pm" → calculate date and use create_alert
 - "set an alert for 7am every day" → use create_alert with recurrence="daily"
 - "what's on my schedule" → use list_alerts or show_schedule
-- "delete the meeting alert" → FIRST use list_alerts to find the alert ID, THEN use delete_alert
-- "change my alert to 4pm" → FIRST use list_alerts to find the alert ID, THEN use update_alert
-- "show my schedule" → use show_schedule (just navigates, don't read the list)
+- "delete the meeting alert" → FIRST use list_alerts to get ID, THEN delete_alert
+- "show my schedule" → use show_schedule (just navigates)
+WORKFLOW: Use YYYY-MM-DD for date, HH:MM (24h) for time. For update/delete, get the alert_id first via list_alerts.
+TERMINOLOGY: Say "alert" or "schedule" not "reminder".''';
+  }
 
-ALERT WORKFLOW:
-1. To CREATE: Calculate the exact date (YYYY-MM-DD) and time (HH:MM in 24-hour format) from user's request
-2. To UPDATE/DELETE by name: First call list_alerts to get the alert_id, then call update_alert or delete_alert
-3. If user says "remind me" - treat it as creating an alert, use "schedule" terminology in response
+  String _getWeatherInstructions() {
+    return '''WEATHER TOOLS:
+- get_weather: Current conditions for a location
+- get_forecast: Future weather (days_ahead: 0=today, 1=tomorrow, etc.)
+- get_air_quality: Pollution and AQI levels''';
+  }
 
-TERMINOLOGY: Always say "alert" or "schedule" instead of "reminder". Say "I've added it to your schedule" not "I've set a reminder".
+  String _getAppsInstructions() {
+    return '''APP LAUNCHER:
+- "open YouTube" → open_app(app_name="YouTube")
+- "cat videos on YouTube" → open_app(app_name="YouTube", search_query="cat videos")
+- "pizza on Google Maps" → open_app(app_name="Google Maps", search_query="pizza")
+- "play Taylor Swift on Spotify" → open_app(app_name="Spotify", search_query="Taylor Swift")
+Extract search_query from phrases like "X on YouTube" or "search for X".''';
+  }
 
-NAVIGATION:
-- "go back" or "close the note" → use go_back to return to conversation
-- "switch to text" or "I want to type" → use show_chat
-- "make an image" or "generate a picture" → use show_image_generator
-- "let's play a game", "games", "riddles", "jokes", "trivia", "spelling", "math" → use start_lesson_mode (navigates to games page and pauses)
+  String _getGamesInstructions() {
+    return '''GAMES:
+- When user wants games, riddles, jokes, trivia, spelling, math → use start_lesson_mode
+- This navigates to games page and pauses so user can select
+- Do NOT run the game yourself - just navigate, the game AI takes over
+- Example: "let's play riddles" → start_lesson_mode(category="riddle")''';
+  }
 
-GAMES:
-- When user wants to play games, riddles, jokes, trivia, spelling, math, etc → call start_lesson_mode
-- This navigates to the games page and pauses so the user can select and start a game
-- Do NOT try to ask questions or run the game yourself - just navigate and let them choose
-- Example: User says "let's play riddles" → call start_lesson_mode(category="riddle")
-- The game AI will take over once the user presses play
-
-PAUSE:
-- "pause", "stop", "hold on", "wait", "be quiet", "stop listening" → use pause_conversation
-- After pausing, the user can resume by tapping play or double-tapping the screen
-
-APP LAUNCHER - When users say things like:
-- "open YouTube" → use open_app with app_name="YouTube"
-- "open cat videos on YouTube" → use open_app with app_name="YouTube", search_query="cat videos"
-- "search for pizza on Google Maps" → use open_app with app_name="Google Maps", search_query="pizza"
-- "play Taylor Swift on Spotify" → use open_app with app_name="Spotify", search_query="Taylor Swift"
-- "show me funny memes on Reddit" → use open_app with app_name="Reddit", search_query="funny memes"
-- "look up headphones on Amazon" → use open_app with app_name="Amazon", search_query="headphones"
-- "open the camera" → use open_app with app_name="Camera"
-- "launch Netflix" → use open_app with app_name="Netflix"
-
-IMPORTANT: Don't read note content aloud unless asked. After creating notes or alerts, just confirm briefly.
-''';
-
-    if (_activeNote == null) {
-      return instructions;
-    }
-
-    // Include full content so AI can reference it when asked
-    return '''$instructions
-CURRENTLY ACTIVE NOTE:
-Title: "${_activeNote!.title}"
-Content:
-${_activeNote!.content}
-
-(The user is viewing this note on screen. You can reference, update, or append to it. Only read the content aloud if asked.)
-''';
+  String _getNavigationInstructions() {
+    return '''NAVIGATION:
+- "go back" → use go_back to return to conversation
+- "switch to text" / "I want to type" → use show_chat
+- "make an image" → use show_image_generator
+- "pause" / "stop" / "hold on" / "be quiet" → use pause_conversation
+User can resume by tapping play or double-tapping.''';
   }
 }
 

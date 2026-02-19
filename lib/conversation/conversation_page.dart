@@ -362,12 +362,12 @@ class _ConversationPageState extends State<ConversationPage> {
           _updateStatusBar(index);
           
           final voiceProvider = context.read<VoiceProvider>();
-          
-          // Only pause for chat page (text/image input) - notes page stays in voice mode
-          if (index == chatPageIndex) {
+
+          // Pause for chat page (text/image input) and game page (manual selection until game starts)
+          if (index == chatPageIndex || index == gamePageIndex) {
             // Only pause if session is actively running (not during initialization)
             // Check for active session states: listening, speaking, thinking, processing
-            if (voiceProvider.state.isSessionActive && 
+            if (voiceProvider.state.isSessionActive &&
                 voiceProvider.state != VoiceState.paused) {
               voiceProvider.pause();
             }
