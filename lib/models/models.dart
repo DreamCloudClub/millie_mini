@@ -7,5 +7,6 @@ export 'voice_state.dart';
 export 'conversation.dart';
 export 'reminder.dart';
 export 'note.dart';
+export 'report.dart';
 export 'game_settings.dart';
 

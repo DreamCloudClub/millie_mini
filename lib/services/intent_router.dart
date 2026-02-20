@@ -8,6 +8,7 @@ enum IntentCategory {
   weather,    // Weather queries
   navigation, // App navigation (go back, show chat, etc.)
   games,      // Games and lessons
+  reports,    // AI reports and news
   none,       // No tools needed - just conversation
 }
 
@@ -104,6 +105,12 @@ class IntentRouter {
     if (_isNavigationIntent(lower)) {
       categories.add(IntentCategory.navigation);
       debugPrint('IntentRouter: Detected navigation intent');
+    }
+
+    // Check for reports intent
+    if (_isReportsIntent(lower)) {
+      categories.add(IntentCategory.reports);
+      debugPrint('IntentRouter: Detected reports intent');
     }
 
     // If no specific intent detected, it's just conversation
@@ -271,6 +278,21 @@ class IntentRouter {
            lower.contains('show games');
   }
 
+  /// Check if message is about AI reports
+  static bool _isReportsIntent(String lower) {
+    return lower.contains('tell me more') ||
+           lower.contains('read it') ||
+           lower.contains('read that') ||
+           lower.contains('what else') ||
+           lower.contains('more about that') ||
+           lower.contains('report') ||
+           lower.contains('show my reports') ||
+           lower.contains('save that') ||
+           lower.contains('keep that') ||
+           lower.contains('news') ||
+           lower.contains('research');
+  }
+
   /// Get tool names for given categories
   static List<String> getToolNamesForCategories(Set<IntentCategory> categories) {
     final tools = <String>{};
@@ -324,6 +346,13 @@ class IntentRouter {
             'start_lesson_mode',
             'exit_lesson_mode',
             'show_games',
+          ]);
+          break;
+        case IntentCategory.reports:
+          tools.addAll([
+            'show_reports',
+            'read_report',
+            'save_report',
           ]);
           break;
         case IntentCategory.none:

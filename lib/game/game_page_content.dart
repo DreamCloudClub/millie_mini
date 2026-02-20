@@ -9,7 +9,7 @@ import '../face/control_bar.dart';
 import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
 import '../services/image_cache_service.dart';
-import '../geography/us_map_widget.dart';
+import '../geography/us_states_map_widget.dart';
 import 'lesson_phase.dart';
 
 /// Game display page for riddles, jokes, and interactive games
@@ -1381,25 +1381,25 @@ class _GamePageContentState extends State<GamePageContent> {
     final stateId = lessonState.currentItem?.stateId ?? '';
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Top padding above map
+          const SizedBox(height: 100),
+
           // US Map with highlighted state
           Center(
-            child: SizedBox(
-              width: double.infinity,
-              child: USMapWidget(
-                highlightedStateId: stateId,
-                highlightColor: const Color(0xFFFF9800), // Orange
-                highlightBorderColor: const Color(0xFFE65100), // Dark orange
-                stateColor: const Color(0xFF424242), // Dark grey
-                stateBorderColor: const Color(0xFF616161), // Medium grey
+            child: FractionallySizedBox(
+              widthFactor: 0.9,
+              child: USStatesMapWidget(
+                featuredStateCode: stateId,
               ),
             ),
           ),
 
-          const SizedBox(height: AppSpacing.lg),
+          // Big spacing below map
+          const SizedBox(height: 80),
 
           // State name under map
           Text(
@@ -1407,13 +1407,13 @@ class _GamePageContentState extends State<GamePageContent> {
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontFamily: AppTextStyles.fontFamily,
-              fontSize: 32,
+              fontSize: 28,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
           ),
 
-          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: 24),
 
           // Description under name
           Text(
@@ -1441,14 +1441,14 @@ class _GamePageContentState extends State<GamePageContent> {
     final progressFontSize = isLarge ? 22.0 : 16.0;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Progress indicator
           if (lessonState.questionCount > 0)
             Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              padding: const EdgeInsets.only(bottom: 16),
               child: Text(
                 lessonState.progressText,
                 textAlign: TextAlign.center,
@@ -1460,21 +1460,21 @@ class _GamePageContentState extends State<GamePageContent> {
               ),
             ),
 
-          // US Map with highlighted state (orange on grey)
+          // Top padding above map
+          const SizedBox(height: 80),
+
+          // US Map with highlighted state
           Center(
-            child: SizedBox(
-              width: double.infinity,
-              child: USMapWidget(
-                highlightedStateId: stateId,
-                highlightColor: const Color(0xFFFF9800), // Orange
-                highlightBorderColor: const Color(0xFFE65100), // Dark orange
-                stateColor: const Color(0xFF424242), // Dark grey
-                stateBorderColor: const Color(0xFF616161), // Medium grey
+            child: FractionallySizedBox(
+              widthFactor: 0.9,
+              child: USStatesMapWidget(
+                featuredStateCode: stateId,
               ),
             ),
           ),
 
-          const SizedBox(height: AppSpacing.lg),
+          // Big spacing below map
+          const SizedBox(height: 80),
 
           // Hint/clue text (doesn't reveal the state name)
           Text(
@@ -1488,7 +1488,8 @@ class _GamePageContentState extends State<GamePageContent> {
             ),
           ),
 
-          const SizedBox(height: AppSpacing.lg),
+          // Big spacing between text and timer
+          const SizedBox(height: 80),
 
           // Timer during LISTEN phase, Answer during FEEDBACK phase
           _buildTimerOrAnswer(context, lessonState),

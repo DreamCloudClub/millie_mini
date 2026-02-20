@@ -6,7 +6,6 @@ import '../providers/providers.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
 import '../services/services.dart';
-import '../services/supabase_service.dart';
 import '../services/reminder_scheduler_service.dart';
 import '../services/note_tools_handler.dart';
 import '../game/game_page_content.dart';
@@ -14,6 +13,7 @@ import '../face/face_page_content.dart';
 import '../chat/chat_page.dart';
 import '../notes/notes_page.dart';
 import '../notes/note_view_page.dart';
+import '../reports/reports_page.dart';
 import '../reminders/schedule_page.dart';
 
 /// Main conversation page with swipeable navigation between Chat, Face, and Notes
@@ -37,14 +37,16 @@ class _ConversationPageState extends State<ConversationPage> {
   // Keys to access page states for external control
   final GlobalKey<ChatPageState> _chatPageKey = GlobalKey<ChatPageState>();
   final GlobalKey<NotesPageState> _notesPageKey = GlobalKey<NotesPageState>();
+  final GlobalKey<ReportsPageState> _reportsPageKey = GlobalKey<ReportsPageState>();
   final GlobalKey<SchedulePageState> _schedulePageKey = GlobalKey<SchedulePageState>();
 
   // Page indices
   static const int gamePageIndex = 0;
   static const int chatPageIndex = 1;
   static const int facePageIndex = 2;
-  static const int notesPageIndex = 3;
-  static const int schedulePageIndex = 4;
+  static const int reportsPageIndex = 3;
+  static const int notesPageIndex = 4;
+  static const int schedulePageIndex = 5;
 
   @override
   void initState() {
@@ -126,6 +128,14 @@ class _ConversationPageState extends State<ConversationPage> {
           case AINavigationTarget.game:
             _jumpToPage(gamePageIndex);
             break;
+
+          case AINavigationTarget.reports:
+            _navigateToPage(reportsPageIndex);
+            break;
+
+          case AINavigationTarget.reportView:
+            // Report view navigation is handled via _openReportViewFromAI
+            break;
         }
       });
     };
@@ -140,6 +150,12 @@ class _ConversationPageState extends State<ConversationPage> {
     voiceProvider.noteToolsHandler.onScheduleListChanged = () {
       debugPrint('AI triggered schedule list refresh');
       _schedulePageKey.currentState?.refreshSchedule();
+    };
+
+    // Set up callback for when reports list should refresh
+    voiceProvider.noteToolsHandler.onReportsListChanged = () {
+      debugPrint('AI triggered reports list refresh');
+      _reportsPageKey.currentState?.refreshReports();
     };
 
     // Set up callback for game navigation
@@ -281,6 +297,7 @@ class _ConversationPageState extends State<ConversationPage> {
   void _navigateToGame() => _navigateToPage(gamePageIndex);
   void _navigateToChat() => _navigateToPage(chatPageIndex);
   void _navigateToFace() => _navigateToPage(facePageIndex);
+  void _navigateToReports() => _navigateToPage(reportsPageIndex);
   void _navigateToNotes() => _navigateToPage(notesPageIndex);
   void _navigateToSchedule() => _navigateToPage(schedulePageIndex);
   
@@ -408,12 +425,23 @@ class _ConversationPageState extends State<ConversationPage> {
             onExit: _handleExit,
             onNavigateToGame: _navigateToGame,
             onNavigateToChat: _navigateToChat,
+            onNavigateToReports: _navigateToReports,
             onNavigateToNotes: _navigateToNotes,
             onNavigateToSchedule: _navigateToSchedule,
             onRefreshSession: _startSession,
           ),
 
-          // Page 3: Notes Page
+          // Page 3: Reports Page
+          ReportsPage(
+            key: _reportsPageKey,
+            onNavigateToFace: _navigateToFace,
+            onPause: () => context.read<VoiceProvider>().pause(),
+            onPlay: () => context.read<VoiceProvider>().resume(),
+            onRefresh: _handleRefreshFromChat,
+            onExit: _handleExit,
+          ),
+
+          // Page 4: Notes Page
           NotesPage(
             key: _notesPageKey,
             onNavigateToFace: _navigateToFace,
@@ -423,7 +451,7 @@ class _ConversationPageState extends State<ConversationPage> {
             onExit: _handleExit,
           ),
 
-          // Page 4: Schedule Page
+          // Page 5: Schedule Page
           SchedulePage(
             key: _schedulePageKey,
             onNavigateToFace: _navigateToFace,

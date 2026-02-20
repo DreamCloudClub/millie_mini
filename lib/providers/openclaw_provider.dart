@@ -155,8 +155,18 @@ class OpenClawProvider extends ChangeNotifier {
   }
 
   /// Send a message to OpenClaw and get response
-  /// Returns the assistant's response text, or null on error
-  Future<String?> sendMessage(String message) async {
+  /// Returns OpenClawResponse with text and/or tool calls, or null on error
+  ///
+  /// Optional parameters to match OpenAI behavior:
+  /// - systemPrompt: Instructions for the AI
+  /// - tools: Tool definitions for function calling
+  /// - conversationHistory: Previous messages for context
+  Future<OpenClawResponse?> sendMessage(
+    String message, {
+    String? systemPrompt,
+    List<Map<String, dynamic>>? tools,
+    List<Map<String, dynamic>>? conversationHistory,
+  }) async {
     if (!_enabled) {
       debugPrint('OpenClaw: Not enabled, cannot send message');
       return null;
@@ -170,7 +180,12 @@ class OpenClawProvider extends ChangeNotifier {
       }
     }
 
-    final response = await _service.sendMessage(message);
+    final response = await _service.sendMessage(
+      message,
+      systemPrompt: systemPrompt,
+      tools: tools,
+      conversationHistory: conversationHistory,
+    );
     if (response == null) {
       _error = _service.lastError;
       notifyListeners();

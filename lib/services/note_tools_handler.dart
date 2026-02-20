@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../providers/reminder_provider.dart';
+import '../providers/reports_provider.dart';
 import 'app_launcher_service.dart';
 import 'intent_router.dart';
 import 'notes_service.dart';
@@ -63,15 +64,20 @@ enum AINavigationTarget {
   face,
   schedule, // Schedule/alerts page
   game, // Game display page
+  reports, // AI Reports page
+  reportView, // Single report view
 }
 
-/// Unified handler for AI operations via function calling (notes + schedule + weather)
+/// Unified handler for AI operations via function calling (notes + schedule + weather + reports)
 class NoteToolsHandler {
   // Reminder provider for schedule operations
   ReminderProvider? _reminderProvider;
 
   // Weather service for weather queries
   WeatherService? _weatherService;
+
+  // Reports provider for AI reports
+  ReportsProvider? _reportsProvider;
 
   // Track the currently active/open note
   Note? _activeNote;
@@ -86,6 +92,11 @@ class NoteToolsHandler {
   /// Set the weather service (injected with API key)
   void setWeatherService(WeatherService service) {
     _weatherService = service;
+  }
+
+  /// Set the reports provider (injected from VoiceProvider)
+  void setReportsProvider(ReportsProvider provider) {
+    _reportsProvider = provider;
   }
   
   /// Callback when active note changes (for UI updates)
@@ -124,6 +135,9 @@ class NoteToolsHandler {
 
   /// Callback when schedule list should be refreshed (create, update, delete)
   VoidCallback? onScheduleListChanged;
+
+  /// Callback when reports list should be refreshed
+  VoidCallback? onReportsListChanged;
 
   /// Callback to start lesson mode (FSM-controlled)
   Future<void> Function(String category)? onStartLessonMode;
@@ -587,6 +601,53 @@ class NoteToolsHandler {
         },
       },
     },
+    // ===== AI REPORTS TOOLS =====
+    {
+      'type': 'function',
+      'function': {
+        'name': 'show_reports',
+        'description': 'Navigate to the AI Reports page to show all reports. Use when user wants to see their AI reports, news, or research findings.',
+        'parameters': {
+          'type': 'object',
+          'properties': {},
+          'required': [],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'read_report',
+        'description': 'Read the full content of a report. Use when user says "tell me more", "read it", "what else" after a report was announced, or wants to hear the full content of the most recent report.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'report_id': {
+              'type': 'string',
+              'description': 'The ID of the report to read (optional, defaults to most recently announced report)',
+            },
+          },
+          'required': [],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'save_report',
+        'description': 'Save a report to prevent it from auto-deleting. Use when user wants to keep or save the current/recent report.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'report_id': {
+              'type': 'string',
+              'description': 'The ID of the report to save (optional, defaults to most recently announced report)',
+            },
+          },
+          'required': [],
+        },
+      },
+    },
     // ===== CAPABILITY REQUEST TOOL (always available) =====
     {
       'type': 'function',
@@ -598,8 +659,8 @@ class NoteToolsHandler {
           'properties': {
             'capability': {
               'type': 'string',
-              'enum': ['notes', 'schedule', 'weather', 'apps', 'games', 'navigation'],
-              'description': 'The capability needed: notes (save/manage notes), schedule (alerts/reminders), weather (forecasts), apps (open external apps), games (play games), navigation (app navigation)',
+              'enum': ['notes', 'schedule', 'weather', 'apps', 'games', 'navigation', 'reports'],
+              'description': 'The capability needed: notes (save/manage notes), schedule (alerts/reminders), weather (forecasts), apps (open external apps), games (play games), navigation (app navigation), reports (AI news reports)',
             },
           },
           'required': ['capability'],
@@ -688,6 +749,13 @@ class NoteToolsHandler {
       // App launcher
       case 'open_app':
         return await _openApp(toolCall.arguments);
+      // Reports tools
+      case 'show_reports':
+        return _showReports();
+      case 'read_report':
+        return await _readReport(toolCall.arguments);
+      case 'save_report':
+        return await _saveReport(toolCall.arguments);
       // Capability request (triggers retry with requested tools)
       case 'request_capability':
         return _requestCapability(toolCall.arguments);
@@ -1756,6 +1824,95 @@ class NoteToolsHandler {
     );
   }
 
+  // ===== REPORTS METHODS =====
+
+  /// Navigate to the AI Reports page
+  AIToolResult _showReports() {
+    onNavigate?.call(AINavigationTarget.reports);
+
+    return AIToolResult(
+      success: true,
+      message: 'Here are your AI reports.',
+    );
+  }
+
+  /// Read the full content of a report ("tell me more")
+  Future<AIToolResult> _readReport(Map<String, dynamic> args) async {
+    if (_reportsProvider == null) {
+      return AIToolResult(
+        success: false,
+        message: 'Reports system not available.',
+      );
+    }
+
+    final reportId = args['report_id'] as String?;
+
+    // Get the report - either by ID or the most recently announced one
+    Report? report;
+    if (reportId != null && reportId.isNotEmpty) {
+      report = await _reportsProvider!.getReport(reportId);
+    } else {
+      // Get the most recently announced report
+      report = _reportsProvider!.lastAnnouncedReport;
+    }
+
+    if (report == null) {
+      return AIToolResult(
+        success: false,
+        message: 'I don\'t have a recent report to tell you about. Would you like me to check for new reports?',
+      );
+    }
+
+    // Return the full content for TTS
+    return AIToolResult(
+      success: true,
+      message: report.content,
+    );
+  }
+
+  /// Save a report to prevent auto-deletion
+  Future<AIToolResult> _saveReport(Map<String, dynamic> args) async {
+    if (_reportsProvider == null) {
+      return AIToolResult(
+        success: false,
+        message: 'Reports system not available.',
+      );
+    }
+
+    final reportId = args['report_id'] as String?;
+
+    // Get the report ID - either provided or from the most recently announced one
+    String? idToSave = reportId;
+    if (idToSave == null || idToSave.isEmpty) {
+      final lastReport = _reportsProvider!.lastAnnouncedReport;
+      if (lastReport != null) {
+        idToSave = lastReport.id;
+      }
+    }
+
+    if (idToSave == null) {
+      return AIToolResult(
+        success: false,
+        message: 'I don\'t have a recent report to save. Would you like me to show your reports?',
+      );
+    }
+
+    final success = await _reportsProvider!.saveReport(idToSave);
+
+    if (success) {
+      onReportsListChanged?.call();
+      return AIToolResult(
+        success: true,
+        message: 'I\'ve saved that report for you. It won\'t be deleted automatically now.',
+      );
+    } else {
+      return AIToolResult(
+        success: false,
+        message: 'Failed to save the report. Please try again.',
+      );
+    }
+  }
+
   /// Helper to format time for display
   String _formatTime(DateTime dt) {
     final hour = dt.hour;
@@ -1800,7 +1957,7 @@ class NoteToolsHandler {
 
     // === ALWAYS INCLUDED: Capabilities summary ===
     buffer.writeln();
-    buffer.writeln('YOUR CAPABILITIES: You can manage notes, set schedule alerts, check weather, open external apps, play games, and navigate the app.');
+    buffer.writeln('YOUR CAPABILITIES: You can manage notes, set schedule alerts, check weather, open external apps, play games, access AI reports, and navigate the app.');
     buffer.writeln('If you need to do something but don\'t have the right tool, use request_capability to get it.');
 
     // === ALWAYS INCLUDED: Active note context (if present) ===
@@ -1851,6 +2008,12 @@ class NoteToolsHandler {
     if (activeIntents.contains(IntentCategory.navigation)) {
       buffer.writeln();
       buffer.writeln(_getNavigationInstructions());
+    }
+
+    // Reports instructions
+    if (activeIntents.contains(IntentCategory.reports)) {
+      buffer.writeln();
+      buffer.writeln(_getReportsInstructions());
     }
 
     // General reminder (always)
@@ -1914,6 +2077,14 @@ Extract search_query from phrases like "X on YouTube" or "search for X".''';
 - "make an image" → use show_image_generator
 - "pause" / "stop" / "hold on" / "be quiet" → use pause_conversation
 User can resume by tapping play or double-tapping.''';
+  }
+
+  String _getReportsInstructions() {
+    return '''AI REPORTS:
+- "tell me more" / "read it" / "what else" → use read_report (reads full content of last announced report)
+- "save that" / "keep that report" → use save_report (prevents auto-deletion)
+- "show my reports" / "what reports do I have" → use show_reports (navigates to reports page)
+CONTEXT: After announcing a report, user may say "tell me more" to hear the full content.''';
   }
 }
 

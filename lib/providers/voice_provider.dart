@@ -15,6 +15,8 @@ import '../game/lesson_phase.dart';
 import 'reminder_provider.dart';
 import 'custom_quiz_provider.dart';
 import 'openclaw_provider.dart';
+import 'reports_provider.dart';
+import '../services/openai_service.dart';
 
 class VoiceProvider extends ChangeNotifier {
   final _uuid = const Uuid();
@@ -24,6 +26,7 @@ class VoiceProvider extends ChangeNotifier {
   ReminderIntentHandler? _reminderIntentHandler;
   ReminderProvider? _reminderProvider;
   OpenClawProvider? _openClawProvider;
+  ReportsProvider? _reportsProvider;
   final NoteToolsHandler _noteToolsHandler = NoteToolsHandler();
 
   VoiceState _state = VoiceState.sleep;
@@ -88,6 +91,65 @@ class VoiceProvider extends ChangeNotifier {
     debugPrint('VoiceProvider: OpenClawProvider set');
   }
 
+  /// Set ReportsProvider reference (for AI report announcements)
+  void setReportsProvider(ReportsProvider provider) {
+    _reportsProvider = provider;
+    _noteToolsHandler.setReportsProvider(provider);
+
+    // Wire up report announcement callback
+    provider.onAnnounceReport = (report) {
+      _announceReport(report);
+    };
+
+    debugPrint('VoiceProvider: ReportsProvider set');
+  }
+
+  /// Announce a new report via TTS
+  Future<void> _announceReport(Report report) async {
+    // Only announce if in paused or sleep state
+    if (_state != VoiceState.paused && _state != VoiceState.sleep) {
+      debugPrint('VoiceProvider: Skipping report announcement - active conversation');
+      return;
+    }
+
+    // Build announcement message
+    final announcement = "Hey, I found an interesting ${report.category} story: ${report.summary}";
+
+    debugPrint('VoiceProvider: Announcing report: ${report.title}');
+
+    // Similar to reminder announcement - play TTS and start listening
+    try {
+      await _pipeline.stopSleepMode();
+
+      // Process personality prompt
+      final processedPersonalityPrompt = _pendingPersonalityPrompt != null
+          ? replaceAgentNamePlaceholder(_pendingPersonalityPrompt!, _pendingAgentName)
+          : null;
+
+      // Play announcement and start listening
+      await _pipeline.playIntroMessage(
+        announcement,
+        _pendingVoice ?? 'alloy',
+        autoStartListening: true,
+        agentId: _pendingAgentId ?? '',
+        personalityPrompt: processedPersonalityPrompt,
+        aiServiceId: _pendingAiServiceId,
+        username: _pendingUsername,
+        bio: _pendingBio,
+        userId: _pendingUserId,
+        userEmail: _pendingUserEmail,
+        subscriptionStatus: _pendingSubscriptionStatus,
+        getConversationHistory: () => getConversationHistory(),
+      );
+
+      // Mark as announced
+      await _reportsProvider?.markAnnounced(report.id);
+
+    } catch (e) {
+      debugPrint('VoiceProvider: Error announcing report: $e');
+    }
+  }
+
   /// Update the pipeline's alternative LLM handler based on OpenClaw state
   void _updateOpenClawHandler() {
     if (_openClawProvider == null) return;
@@ -104,24 +166,68 @@ class VoiceProvider extends ChangeNotifier {
   }
 
   /// Handle message via OpenClaw
-  Future<String?> _handleOpenClawMessage(String message) async {
+  /// Sends message to Bubble, which has its own tools/skills configured server-side.
+  /// Bubble returns tool_use items that we execute locally on the tablet.
+  Future<String?> _handleOpenClawMessage({
+    required String userMessage,
+    required String systemPrompt,
+    List<Map<String, dynamic>>? tools,
+    List<Map<String, dynamic>>? conversationHistory,
+  }) async {
     if (_openClawProvider == null || !_openClawProvider!.enabled) {
       return null; // Fall back to default LLM
     }
 
     try {
-      final response = await _openClawProvider!.sendMessage(message);
+      debugPrint('VoiceProvider: Sending to OpenClaw');
+      final response = await _openClawProvider!.sendMessage(
+        userMessage,
+        systemPrompt: systemPrompt,
+        tools: tools,
+        conversationHistory: conversationHistory,
+      );
+
       if (response == null) {
         // OpenClaw failed - speak error via TTS
-        final errorMessage = "I'm having trouble connecting. You may need to check your OpenClaw settings.";
+        final errorMessage = "I'm having trouble connecting. You may need to check your Brain settings.";
         debugPrint('VoiceProvider: OpenClaw error - ${_openClawProvider!.error}');
-        // Return error message to be spoken (this will go through TTS)
         return errorMessage;
       }
-      return response;
+
+      // Process any tool calls from OpenClaw/Bubble
+      if (response.hasToolCalls) {
+        debugPrint('VoiceProvider: Processing ${response.toolCalls.length} tool call(s) from OpenClaw');
+
+        String? lastToolMessage;
+        for (final toolCall in response.toolCalls) {
+          debugPrint('VoiceProvider: Executing tool: ${toolCall.name}');
+
+          // Convert OpenClawToolCall to ToolCall format expected by handler
+          final internalToolCall = ToolCall(
+            id: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.input,
+          );
+
+          final result = await _noteToolsHandler.executeTool(internalToolCall);
+          debugPrint('VoiceProvider: Tool result: ${result.success} - ${result.message}');
+
+          lastToolMessage = result.message;
+        }
+
+        // Return text response if present, otherwise last tool message
+        if (response.hasText) {
+          return response.text;
+        } else if (lastToolMessage != null) {
+          return lastToolMessage;
+        }
+      }
+
+      // Just text response, no tools
+      return response.text;
     } catch (e) {
       debugPrint('VoiceProvider: OpenClaw exception - $e');
-      return "I'm having trouble connecting. You may need to check your OpenClaw settings.";
+      return "I'm having trouble connecting. You may need to check your Brain settings.";
     }
   }
 

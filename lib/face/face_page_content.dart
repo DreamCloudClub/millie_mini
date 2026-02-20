@@ -18,6 +18,7 @@ class FacePageContent extends StatefulWidget {
   final VoidCallback onExit;
   final VoidCallback onNavigateToGame;
   final VoidCallback onNavigateToChat;
+  final VoidCallback onNavigateToReports;
   final VoidCallback onNavigateToNotes;
   final VoidCallback onNavigateToSchedule;
   final Future<void> Function() onRefreshSession;
@@ -27,6 +28,7 @@ class FacePageContent extends StatefulWidget {
     required this.onExit,
     required this.onNavigateToGame,
     required this.onNavigateToChat,
+    required this.onNavigateToReports,
     required this.onNavigateToNotes,
     required this.onNavigateToSchedule,
     required this.onRefreshSession,
@@ -186,6 +188,11 @@ class _FacePageContentState extends State<FacePageContent> {
   void _handleNavigateToChat() {
     _hideControlBar();
     widget.onNavigateToChat();
+  }
+
+  void _handleNavigateToReports() {
+    _hideControlBar();
+    widget.onNavigateToReports();
   }
 
   void _handleNavigateToNotes() {
@@ -495,6 +502,7 @@ class _FacePageContentState extends State<FacePageContent> {
                       child: _TopNavBar(
                         onNavigateToGame: _handleNavigateToGame,
                         onNavigateToChat: _handleNavigateToChat,
+                        onNavigateToReports: _handleNavigateToReports,
                         onNavigateToNotes: _handleNavigateToNotes,
                         onNavigateToSchedule: _handleNavigateToSchedule,
                       ),
@@ -524,12 +532,14 @@ class _FacePageContentState extends State<FacePageContent> {
 class _TopNavBar extends StatelessWidget {
   final VoidCallback onNavigateToGame;
   final VoidCallback onNavigateToChat;
+  final VoidCallback onNavigateToReports;
   final VoidCallback onNavigateToNotes;
   final VoidCallback onNavigateToSchedule;
 
   const _TopNavBar({
     required this.onNavigateToGame,
     required this.onNavigateToChat,
+    required this.onNavigateToReports,
     required this.onNavigateToNotes,
     required this.onNavigateToSchedule,
   });
@@ -565,6 +575,11 @@ class _TopNavBar extends StatelessWidget {
             icon: Icons.chat_bubble_outline,
             label: 'Chat',
             onTap: onNavigateToChat,
+          ),
+          _NavButton(
+            icon: Icons.article_outlined,
+            label: 'Reports',
+            onTap: onNavigateToReports,
           ),
           _NavButton(
             icon: Icons.note_alt_outlined,

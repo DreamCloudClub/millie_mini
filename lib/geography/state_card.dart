@@ -1,55 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../models/us_state.dart';
-import 'us_map_widget.dart';
-import 'state_silhouette_widget.dart';
+import 'us_states_map_widget.dart';
 
 /// A consistent landscape card showing a U.S. state
-/// Left panel: State silhouette (blue) with optional flag
-/// Right panel: U.S. map with state highlighted (orange)
+/// Shows US map with state highlighted (orange on light blue)
 class StateCard extends StatelessWidget {
   /// The state to display
   final USState state;
 
-  /// Whether to show the state flag below the silhouette
-  final bool showFlag;
-
-  /// Whether to show the state name (can be hidden for quiz mode)
+  /// Whether to show the state name
   final bool showName;
 
   /// Background color for the card
   final Color backgroundColor;
 
-  /// Silhouette fill color
-  final Color silhouetteColor;
-
-  /// Silhouette border color
-  final Color silhouetteBorderColor;
-
-  /// Highlighted state fill color on map
-  final Color highlightColor;
-
-  /// Highlighted state border color on map
-  final Color highlightBorderColor;
-
-  /// Other states color on map
-  final Color mapStateColor;
-
-  /// Map background color
-  final Color mapBackgroundColor;
-
   const StateCard({
     super.key,
     required this.state,
-    this.showFlag = true,
     this.showName = true,
     this.backgroundColor = const Color(0xFFF5F5F5),
-    this.silhouetteColor = const Color(0xFF2196F3), // Blue
-    this.silhouetteBorderColor = const Color(0xFF1565C0), // Bright blue
-    this.highlightColor = const Color(0xFFFF9800), // Orange
-    this.highlightBorderColor = const Color(0xFFE65100), // Bright orange
-    this.mapStateColor = const Color(0xFFE0E0E0), // Light grey
-    this.mapBackgroundColor = const Color(0xFF9E9E9E), // Medium grey
   });
 
   @override
@@ -68,85 +38,39 @@ class StateCard extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
           children: [
-            // Left panel: Silhouette + optional flag
+            // State name (if shown)
+            if (showName) ...[
+              Text(
+                state.name,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                state.id,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            // US Map with highlighted state
             Expanded(
-              flex: 2,
-              child: _buildLeftPanel(),
-            ),
-            const SizedBox(width: 16),
-            // Right panel: US Map
-            Expanded(
-              flex: 3,
-              child: _buildRightPanel(),
+              child: USStatesMapWidget(
+                featuredStateCode: state.id,
+              ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildLeftPanel() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        // State name (if shown)
-        if (showName) ...[
-          Text(
-            state.name,
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            state.id,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: Colors.grey[600],
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
-        // State silhouette
-        Expanded(
-          child: StateSilhouetteWidget(
-            stateId: state.id,
-            fillColor: silhouetteColor,
-            borderColor: silhouetteBorderColor,
-          ),
-        ),
-        // Optional flag
-        if (showFlag && state.flagAssetPath != null) ...[
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 40,
-            child: Image.asset(
-              state.flagAssetPath!,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                // Fallback if flag not found
-                return const SizedBox.shrink();
-              },
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildRightPanel() {
-    return USMapWidget(
-      highlightedStateId: state.id,
-      highlightColor: highlightColor,
-      highlightBorderColor: highlightBorderColor,
-      stateColor: mapStateColor,
-      backgroundColor: mapBackgroundColor,
     );
   }
 }
@@ -172,14 +96,12 @@ class StateCardCompact extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // State silhouette thumbnail
+              // Small map thumbnail with highlighted state
               SizedBox(
-                width: 60,
-                height: 40,
-                child: StateSilhouetteWidget(
-                  stateId: state.id,
-                  fillColor: const Color(0xFF2196F3),
-                  borderColor: const Color(0xFF1565C0),
+                width: 80,
+                height: 50,
+                child: USStatesMapWidget(
+                  featuredStateCode: state.id,
                 ),
               ),
               const SizedBox(width: 12),

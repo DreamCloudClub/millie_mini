@@ -14,7 +14,7 @@ class DashboardPage extends StatelessWidget {
   final VoidCallback onEditAIService;
   final VoidCallback onEditAccountSettings;
   final VoidCallback onEditGameSettings;
-  final VoidCallback onEditOpenClaw;
+  final VoidCallback onEditBrain;
 
   const DashboardPage({
     super.key,
@@ -24,7 +24,7 @@ class DashboardPage extends StatelessWidget {
     required this.onEditAIService,
     required this.onEditAccountSettings,
     required this.onEditGameSettings,
-    required this.onEditOpenClaw,
+    required this.onEditBrain,
   });
 
   @override
@@ -133,8 +133,8 @@ class DashboardPage extends StatelessWidget {
               _AIServiceCard(onEdit: onEditAIService),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 5: OpenClaw
-              _OpenClawCard(onEdit: onEditOpenClaw),
+              // Card 5: Brain
+              _BrainCard(onEdit: onEditBrain),
               const SizedBox(height: AppSpacing.md),
 
               // Card 6: Account Settings
@@ -433,10 +433,10 @@ class _GameSettingsCard extends StatelessWidget {
   }
 }
 
-class _OpenClawCard extends StatelessWidget {
+class _BrainCard extends StatelessWidget {
   final VoidCallback onEdit;
 
-  const _OpenClawCard({required this.onEdit});
+  const _BrainCard({required this.onEdit});
 
   Color _getStatusColor(OpenClawConnectionState state, bool enabled) {
     if (!enabled) return AppColors.textLight;
@@ -471,7 +471,7 @@ class _OpenClawCard extends StatelessWidget {
     return Consumer<OpenClawProvider>(
       builder: (context, provider, _) {
         return AppCard(
-          title: 'OpenClaw',
+          title: 'Brain',
           onEdit: onEdit,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

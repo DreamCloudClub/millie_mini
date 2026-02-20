@@ -1,0 +1,14 @@
+[Unit]
+Description=Brain API - Remote control for headless Pi
+After=network.target
+
+[Service]
+Type=simple
+User=millie
+Environment=BRAIN_TOKEN=brain
+ExecStart=/usr/bin/python3 /home/millie/brain_api.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

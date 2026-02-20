@@ -101,7 +101,18 @@ class VoicePipelineService {
   /// Alternative LLM handler for conversation mode (e.g., OpenClaw)
   /// When set, this is used instead of the default OpenAI _callLLM for conversations.
   /// Returns null to fall back to default LLM, or response string if handled.
-  Future<String?> Function(String userMessage)? alternativeLLMHandler;
+  ///
+  /// Parameters match OpenAI's callChatCompletions:
+  /// - userMessage: The user's transcribed message
+  /// - systemPrompt: Instructions/personality for the AI
+  /// - tools: Tool definitions for function calling
+  /// - conversationHistory: Previous messages for context
+  Future<String?> Function({
+    required String userMessage,
+    required String systemPrompt,
+    List<Map<String, dynamic>>? tools,
+    List<Map<String, dynamic>>? conversationHistory,
+  })? alternativeLLMHandler;
   
   VoicePipelineService(StorageService storageService) 
       : _openaiService = OpenAIService(storageService),
@@ -1649,18 +1660,6 @@ Format note content nicely with line breaks, bullet points, and clear sections.
     debugPrint('LLM processing: $transcription');
 
     try {
-      // Check if alternative LLM handler is set (e.g., OpenClaw for conversation mode)
-      if (alternativeLLMHandler != null) {
-        debugPrint('Using alternative LLM handler (OpenClaw)');
-        final alternativeResponse = await alternativeLLMHandler!(transcription);
-        if (alternativeResponse != null) {
-          debugPrint('Alternative LLM response: ${alternativeResponse.substring(0, alternativeResponse.length > 50 ? 50 : alternativeResponse.length)}...');
-          return alternativeResponse;
-        }
-        // If alternative returns null, fall through to default LLM
-        debugPrint('Alternative LLM returned null, falling back to default');
-      }
-
       // Use IntentRouter to detect intent (used for both tools AND instructions)
       // This significantly reduces token usage (60-90% savings on instructions)
       Set<IntentCategory> intents = {IntentCategory.none};
@@ -1689,6 +1688,25 @@ Format note content nicely with line breaks, bullet points, and clear sections.
           tools = [NoteToolsHandler.requestCapabilityTool];
           debugPrint('IntentRouter: Conversation only - just request_capability tool');
         }
+      }
+
+      // Check if alternative LLM handler is set (e.g., OpenClaw for conversation mode)
+      // Note: OpenClaw/Bubble has its own skills configured server-side
+      // Tools and system prompts are passed for API compatibility but may be ignored
+      if (alternativeLLMHandler != null) {
+        debugPrint('Using alternative LLM handler (OpenClaw)');
+        final alternativeResponse = await alternativeLLMHandler!(
+          userMessage: transcription,
+          systemPrompt: enhancedPrompt,
+          tools: tools,
+          conversationHistory: conversationHistory,
+        );
+        if (alternativeResponse != null) {
+          debugPrint('Alternative LLM response: ${alternativeResponse.substring(0, alternativeResponse.length > 50 ? 50 : alternativeResponse.length)}...');
+          return alternativeResponse;
+        }
+        // If alternative returns null, fall through to default LLM
+        debugPrint('Alternative LLM returned null, falling back to default');
       }
 
       // Use OpenAI Chat Completions API with tools

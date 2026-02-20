@@ -12,6 +12,33 @@ enum OpenClawConnectionState {
   error,
 }
 
+/// Tool call from OpenClaw response
+class OpenClawToolCall {
+  final String id;
+  final String name;
+  final Map<String, dynamic> input;
+
+  OpenClawToolCall({
+    required this.id,
+    required this.name,
+    required this.input,
+  });
+
+  @override
+  String toString() => 'OpenClawToolCall($name, $input)';
+}
+
+/// Response from OpenClaw that may contain text and/or tool calls
+class OpenClawResponse {
+  final String? text;
+  final List<OpenClawToolCall> toolCalls;
+
+  OpenClawResponse({this.text, this.toolCalls = const []});
+
+  bool get hasToolCalls => toolCalls.isNotEmpty;
+  bool get hasText => text != null && text!.isNotEmpty;
+}
+
 /// OpenClaw Service
 /// Handles WebSocket communication with local OpenClaw gateway.
 /// Used for conversation mode only - games bypass this entirely.
@@ -32,7 +59,8 @@ class OpenClawService {
   // Pending chat responses
   String? _currentRunId;
   final StringBuffer _streamingResponse = StringBuffer();
-  Completer<String?>? _chatCompleter;
+  final List<OpenClawToolCall> _pendingToolCalls = [];
+  Completer<OpenClawResponse?>? _chatCompleter;
 
   OpenClawConnectionState get connectionState => _connectionState;
   String? get lastError => _lastError;
@@ -108,9 +136,11 @@ class OpenClawService {
   /// Handle incoming WebSocket messages
   void _handleMessage(dynamic message, Completer<bool>? connectCompleter, Timer? timeoutTimer) {
     try {
+      debugPrint('OpenClaw RAW: $message');
       final data = jsonDecode(message as String) as Map<String, dynamic>;
       final type = data['type'] as String?;
       final event = data['event'] as String?;
+      debugPrint('OpenClaw: Message type=$type, event=$event');
 
       if (type == 'event' && event == 'connect.challenge') {
         _sendConnectRequest();
@@ -197,26 +227,61 @@ class OpenClawService {
 
   /// Handle chat events (contains final message)
   void _handleChatEvent(Map<String, dynamic> data) {
+    debugPrint('OpenClaw: Received chat event: $data');
+
     final payload = data['payload'] as Map<String, dynamic>?;
-    if (payload == null) return;
+    if (payload == null) {
+      debugPrint('OpenClaw: Chat event has no payload');
+      return;
+    }
 
     final runId = payload['runId'] as String?;
     final state = payload['state'] as String?;
 
+    debugPrint('OpenClaw: Chat event - runId=$runId, state=$state, currentRunId=$_currentRunId');
+
     // Only process events for our current request
-    if (runId != _currentRunId) return;
+    if (runId != _currentRunId) {
+      debugPrint('OpenClaw: Ignoring chat event - runId mismatch');
+      return;
+    }
 
     if (state == 'final') {
-      // Extract final message text
+      debugPrint('OpenClaw: Processing final state');
+      // Extract final message content (text and/or tool calls)
       final message = payload['message'] as Map<String, dynamic>?;
+      debugPrint('OpenClaw: message=$message');
       final content = message?['content'] as List<dynamic>?;
-      if (content != null && content.isNotEmpty) {
-        final firstContent = content[0] as Map<String, dynamic>?;
-        if (firstContent?['type'] == 'text') {
-          final text = firstContent?['text'] as String?;
-          if (text != null) {
-            _streamingResponse.clear();
-            _streamingResponse.write(text);
+      debugPrint('OpenClaw: content=$content (${content?.length ?? 0} items)');
+
+      if (content != null) {
+        for (final item in content) {
+          debugPrint('OpenClaw: Content item: $item');
+          final contentItem = item as Map<String, dynamic>?;
+          if (contentItem == null) continue;
+
+          final type = contentItem['type'] as String?;
+
+          if (type == 'text') {
+            final text = contentItem['text'] as String?;
+            if (text != null) {
+              _streamingResponse.clear();
+              _streamingResponse.write(text);
+            }
+          } else if (type == 'tool_use') {
+            // Parse tool call from OpenClaw/Bubble
+            final toolId = contentItem['id'] as String? ?? 'tool_${_pendingToolCalls.length}';
+            final toolName = contentItem['name'] as String?;
+            final toolInput = contentItem['input'] as Map<String, dynamic>? ?? {};
+
+            if (toolName != null) {
+              debugPrint('OpenClaw: Tool call detected: $toolName');
+              _pendingToolCalls.add(OpenClawToolCall(
+                id: toolId,
+                name: toolName,
+                input: toolInput,
+              ));
+            }
           }
         }
       }
@@ -227,11 +292,19 @@ class OpenClawService {
   /// Complete chat with accumulated response
   void _completeChatWithResponse() {
     if (_chatCompleter != null && !_chatCompleter!.isCompleted) {
-      final response = _streamingResponse.toString();
-      _chatCompleter!.complete(response.isNotEmpty ? response : null);
+      final text = _streamingResponse.toString();
+      final toolCalls = List<OpenClawToolCall>.from(_pendingToolCalls);
+
+      debugPrint('OpenClaw: Completing response - text: ${text.isNotEmpty}, toolCalls: ${toolCalls.length}');
+
+      _chatCompleter!.complete(OpenClawResponse(
+        text: text.isNotEmpty ? text : null,
+        toolCalls: toolCalls,
+      ));
     }
     _currentRunId = null;
     _streamingResponse.clear();
+    _pendingToolCalls.clear();
   }
 
   /// Complete chat with error
@@ -241,6 +314,7 @@ class OpenClawService {
     }
     _currentRunId = null;
     _streamingResponse.clear();
+    _pendingToolCalls.clear();
   }
 
   /// Send connect request after receiving challenge
@@ -291,8 +365,18 @@ class OpenClawService {
   }
 
   /// Send a message to OpenClaw and get a response
-  /// Returns the assistant's response text, or null on error
-  Future<String?> sendMessage(String message) async {
+  /// Returns OpenClawResponse with text and/or tool calls, or null on error
+  ///
+  /// Optional parameters to match OpenAI behavior:
+  /// - systemPrompt: Instructions for the AI
+  /// - tools: Tool definitions for function calling
+  /// - conversationHistory: Previous messages for context
+  Future<OpenClawResponse?> sendMessage(
+    String message, {
+    String? systemPrompt,
+    List<Map<String, dynamic>>? tools,
+    List<Map<String, dynamic>>? conversationHistory,
+  }) async {
     if (!isConnected || _channel == null) {
       _lastError = 'Not connected';
       return null;
@@ -308,17 +392,27 @@ class OpenClawService {
       final idempotencyKey = 'idem-${DateTime.now().millisecondsSinceEpoch}';
       _currentRunId = idempotencyKey;
       _streamingResponse.clear();
-      _chatCompleter = Completer<String?>();
+      _pendingToolCalls.clear();
+      _chatCompleter = Completer<OpenClawResponse?>();
+
+      // Build params - OpenClaw's chat.send only supports basic params
+      // Tools and system prompts are configured server-side in Bubble skills
+      // We only send sessionKey, idempotencyKey, and message
+      final params = <String, dynamic>{
+        'sessionKey': _sessionKey,
+        'idempotencyKey': idempotencyKey,
+        'message': message,
+      };
+
+      // Note: systemPrompt, tools, and conversationHistory are ignored
+      // because OpenClaw/Bubble manages its own context and skills server-side.
+      // These params are accepted for API compatibility but not sent to server.
 
       final request = {
         'type': 'req',
         'method': 'chat.send',
         'id': chatId,
-        'params': {
-          'sessionKey': _sessionKey,
-          'idempotencyKey': idempotencyKey,
-          'message': message,
-        },
+        'params': params,
       };
 
       debugPrint('OpenClaw: Sending chat (id=$chatId): ${message.substring(0, message.length > 50 ? 50 : message.length)}...');
@@ -330,13 +424,19 @@ class OpenClawService {
         onTimeout: () {
           _currentRunId = null;
           _streamingResponse.clear();
+          _pendingToolCalls.clear();
           _lastError = 'Response timeout';
           return null;
         },
       );
 
       if (response != null) {
-        debugPrint('OpenClaw: Response: ${response.substring(0, response.length > 50 ? 50 : response.length)}...');
+        if (response.hasText) {
+          debugPrint('OpenClaw: Response text: ${response.text!.substring(0, response.text!.length > 50 ? 50 : response.text!.length)}...');
+        }
+        if (response.hasToolCalls) {
+          debugPrint('OpenClaw: Response has ${response.toolCalls.length} tool call(s)');
+        }
       }
 
       return response;
@@ -355,6 +455,7 @@ class OpenClawService {
     _chatCompleter = null;
     _currentRunId = null;
     _streamingResponse.clear();
+    _pendingToolCalls.clear();
   }
 
   /// Test connection with current settings
