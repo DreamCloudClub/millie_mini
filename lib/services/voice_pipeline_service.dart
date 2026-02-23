@@ -1343,6 +1343,82 @@ class VoicePipelineService {
     }
   }
 
+  /// Generate TTS audio and play it, returning the local file path for caching
+  Future<String?> generateAndPlayTTS(String text, String voice) async {
+    try {
+      debugPrint('Generating TTS for caching: ${text.substring(0, text.length > 50 ? 50 : text.length)}...');
+      onStateChange?.call(VoiceState.speaking);
+
+      final audioPath = await _textToSpeech(text, voice);
+      if (audioPath == null) {
+        debugPrint('Failed to generate TTS audio');
+        return null;
+      }
+
+      // Play the audio
+      try { await _player.stop(); } catch (_) {}
+      _isPlaying = true;
+
+      final completer = Completer<void>();
+      StreamSubscription<void>? subscription;
+      subscription = _player.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted) {
+          completer.complete();
+          subscription?.cancel();
+        }
+      });
+
+      await _player.play(DeviceFileSource(audioPath));
+      await completer.future.timeout(const Duration(seconds: 120), onTimeout: () {
+        subscription?.cancel();
+      });
+
+      _isPlaying = false;
+      onStateChange?.call(VoiceState.paused);
+      debugPrint('TTS playback complete, file at: $audioPath');
+
+      return audioPath;
+    } catch (e) {
+      debugPrint('Error generating/playing TTS: $e');
+      _isPlaying = false;
+      return null;
+    }
+  }
+
+  /// Play audio from a remote URL (for cached report audio)
+  Future<void> playAudioFromUrl(String url) async {
+    try {
+      debugPrint('Playing audio from URL: $url');
+      onStateChange?.call(VoiceState.speaking);
+
+      try { await _player.stop(); } catch (_) {}
+      _isPlaying = true;
+
+      final completer = Completer<void>();
+      StreamSubscription<void>? subscription;
+      subscription = _player.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted) {
+          completer.complete();
+          subscription?.cancel();
+        }
+      });
+
+      await _player.play(UrlSource(url));
+      await completer.future.timeout(const Duration(seconds: 120), onTimeout: () {
+        subscription?.cancel();
+      });
+
+      _isPlaying = false;
+      onStateChange?.call(VoiceState.paused);
+      debugPrint('URL audio playback complete');
+    } catch (e) {
+      debugPrint('Error playing audio from URL: $e');
+      _isPlaying = false;
+      onStateChange?.call(VoiceState.paused);
+      rethrow;
+    }
+  }
+
   // Lesson mode listening state
   bool _isLessonListening = false;
   int? _lessonSessionId;
@@ -1665,6 +1741,13 @@ Format note content nicely with line breaks, bullet points, and clear sections.
       Set<IntentCategory> intents = {IntentCategory.none};
       if (noteToolsHandler != null) {
         intents = IntentRouter.detectIntent(transcription);
+
+        // Merge with forced intents (e.g., reports tools when on Reports page)
+        if (noteToolsHandler!.forcedIntents.isNotEmpty) {
+          intents = {...intents, ...noteToolsHandler!.forcedIntents};
+          intents.remove(IntentCategory.none); // Remove 'none' if we have real intents
+          debugPrint('IntentRouter: Merged forced intents: ${noteToolsHandler!.forcedIntents}');
+        }
       }
 
       // Build enhanced system prompt with intent-aware context

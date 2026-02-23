@@ -13,6 +13,7 @@ import '../services/letters_service.dart';
 import '../services/numbers_service.dart';
 import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
+import '../services/foods_service.dart';
 import '../services/geography_service.dart';
 import '../providers/custom_quiz_provider.dart';
 
@@ -655,6 +656,20 @@ class GameController extends ChangeNotifier {
       }
     }
 
+    // Check for cached audio (foods) - will generate and cache if not found
+    if (_state.isFoodsMode && onPlayAudioFile != null) {
+      final audioPath = await FoodsService.getAudioPath(
+        foodId: item.id,
+        text: item.ttsPrompt,
+        voice: _ttsVoice,
+      );
+      if (audioPath != null) {
+        debugPrint('GameController: Playing audio for ${item.answer}');
+        await onPlayAudioFile!(audioPath);
+        return; // onTTSFinished will be called when playback completes
+      }
+    }
+
     // Fall back to regular TTS
     await _playTTSAndWait(item.ttsPrompt, currentSession);
 
@@ -753,6 +768,21 @@ class GameController extends ChangeNotifier {
     // Animals random - mix of quiz and lessons
     if (category == 'animals:random') {
       return _getNextAnimalRandom();
+    }
+
+    // Foods quiz uses database
+    if (category == 'foods' || category == 'foods:quiz') {
+      return _getNextFood();
+    }
+
+    // Foods lessons uses database (auto-play, no voice input)
+    if (category == 'foods:lessons') {
+      return _getNextFoodLesson();
+    }
+
+    // Foods random - mix of quiz and lessons
+    if (category == 'foods:random') {
+      return _getNextFoodRandom();
     }
 
     // Geography (US States) quiz
@@ -1120,6 +1150,68 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  /// Get next food from database
+  Future<LessonItem?> _getNextFood() async {
+    final problem = await FoodsService.generate(excludeIds: _askedItemIds);
+
+    if (problem == null) {
+      return null; // All foods shown
+    }
+
+    await FoodsService.markAsUsed(problem.id);
+
+    return LessonItem(
+      id: problem.id,
+      type: 'foods',
+      prompt: problem.hint, // "This is a fruit. [description] What is it called?"
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.flexible,
+      cachedAudioUrl: problem.narrationAudioUrl,
+      imageUrl: problem.imageUrl,
+    );
+  }
+
+  /// Get next food lesson (auto-play, no voice input)
+  Future<LessonItem?> _getNextFoodLesson() async {
+    final problem = await FoodsService.generateLesson(excludeIds: _askedItemIds);
+
+    if (problem == null) {
+      return null; // All foods shown
+    }
+
+    await FoodsService.markAsUsed(problem.id);
+
+    return LessonItem(
+      id: problem.id,
+      type: 'foods:lesson',
+      prompt: problem.hint, // Full narration with category included
+      answer: problem.answer,
+      aliases: problem.aliases,
+      gradingType: GradingType.none, // No grading for lessons
+      cachedAudioUrl: problem.narrationAudioUrl,
+      imageUrl: problem.imageUrl,
+    );
+  }
+
+  /// Get next food - randomly picks between quiz and lesson
+  Future<LessonItem?> _getNextFoodRandom() async {
+    // Randomly pick between quiz (0) and lesson (1)
+    final isLesson = Random().nextBool();
+
+    if (isLesson) {
+      final item = await _getNextFoodLesson();
+      if (item != null) return item;
+      // Fall back to quiz if no lessons available
+      return _getNextFood();
+    } else {
+      final item = await _getNextFood();
+      if (item != null) return item;
+      // Fall back to lesson if no quiz available
+      return _getNextFoodLesson();
+    }
+  }
+
   /// Get next geography (US state) quiz from local JSON
   Future<LessonItem?> _getNextGeography() async {
     final problem = await GeographyService.generate(excludeIds: _askedItemIds);
@@ -1298,6 +1390,13 @@ class GameController extends ChangeNotifier {
         return "Let's learn about animals! I'll show you an animal and tell you all about it.";
       case 'animals:random':
         return "Let's explore animals! Sometimes I'll quiz you, and sometimes I'll teach you something new.";
+      case 'foods':
+      case 'foods:quiz':
+        return "Let's learn about foods! I'll show you a food and describe it, then you tell me what it's called.";
+      case 'foods:lessons':
+        return "Let's learn about foods! I'll show you different foods and tell you all about them.";
+      case 'foods:random':
+        return "Let's explore foods! Sometimes I'll quiz you, and sometimes I'll teach you something new.";
       case 'geography':
       case 'geography:quiz':
         return "Let's learn about U.S. states! I'll show you a state on the map and give you some clues. Can you guess which state it is?";
@@ -1451,6 +1550,17 @@ class GameController extends ChangeNotifier {
       if (_state.isAnimalsMode && onPlayAudioFile != null) {
         final audioPath = await AnimalsService.getAudioPath(
           animalId: item.id,
+          text: item.ttsPrompt,
+          voice: _ttsVoice,
+        );
+        if (audioPath != null) {
+          await onPlayAudioFile!(audioPath);
+          return;
+        }
+      }
+      if (_state.isFoodsMode && onPlayAudioFile != null) {
+        final audioPath = await FoodsService.getAudioPath(
+          foodId: item.id,
           text: item.ttsPrompt,
           voice: _ttsVoice,
         );

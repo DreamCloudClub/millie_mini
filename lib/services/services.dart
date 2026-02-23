@@ -14,4 +14,6 @@ export 'true_false_service.dart';
 export 'shapes_service.dart';
 export 'face_image_service.dart';
 export 'openclaw_service.dart';
+export 'report_settings_service.dart';
+export 'report_scheduler_service.dart';
 

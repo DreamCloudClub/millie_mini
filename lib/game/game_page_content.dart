@@ -8,6 +8,7 @@ import '../utils/constants.dart';
 import '../face/control_bar.dart';
 import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
+import '../services/foods_service.dart';
 import '../services/image_cache_service.dart';
 import '../geography/us_states_map_widget.dart';
 import 'lesson_phase.dart';
@@ -49,10 +50,16 @@ class _GamePageContentState extends State<GamePageContent> {
   bool _showBrainGamesMenu = false;
   bool _showLearningMenu = false;
 
-  /// Sub-category menus (within Learning)
-  bool _showMathMenu = false;
+  /// Learning category menus (Math, Language, Science)
+  bool _showMathCategoryMenu = false;
+  bool _showLanguageMenu = false;
+  bool _showScienceMenu = false;
+
+  /// Sub-category menus (within Learning categories)
+  bool _showMathMenu = false;  // Equations submenu (Addition, Subtraction, etc.)
   bool _showLettersMenu = false;
   bool _showAnimalsMenu = false;
+  bool _showFoodsMenu = false;
   bool _showGeographyMenu = false;
 
   /// Track if game was running in previous frame (to detect game end)
@@ -89,15 +96,20 @@ class _GamePageContentState extends State<GamePageContent> {
             // Reset submenus when returning from a game
             final isGameRunning = lessonState.isGameRunning;
             final anyMenuOpen = _showBrainGamesMenu || _showLearningMenu ||
-                _showMathMenu || _showLettersMenu || _showAnimalsMenu || _showGeographyMenu;
+                _showMathCategoryMenu || _showLanguageMenu || _showScienceMenu ||
+                _showMathMenu || _showLettersMenu || _showAnimalsMenu || _showFoodsMenu || _showGeographyMenu;
             if (_wasGameRunning && !isGameRunning && anyMenuOpen) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) setState(() {
                   _showBrainGamesMenu = false;
                   _showLearningMenu = false;
+                  _showMathCategoryMenu = false;
+                  _showLanguageMenu = false;
+                  _showScienceMenu = false;
                   _showMathMenu = false;
                   _showLettersMenu = false;
                   _showAnimalsMenu = false;
+                  _showFoodsMenu = false;
                   _showGeographyMenu = false;
                 });
               });
@@ -121,29 +133,43 @@ class _GamePageContentState extends State<GamePageContent> {
                             setState(() {
                               _showBrainGamesMenu = false;
                               _showLearningMenu = false;
+                              _showMathCategoryMenu = false;
+                              _showLanguageMenu = false;
+                              _showScienceMenu = false;
                               _showMathMenu = false;
                               _showLettersMenu = false;
                               _showAnimalsMenu = false;
+                              _showFoodsMenu = false;
                               _showGeographyMenu = false;
                             });
                             return;
                           }
 
-                          if (_showMathMenu || _showLettersMenu) {
-                            // Go back to Learning menu
-                            setState(() {
-                              _showMathMenu = false;
-                              _showLettersMenu = false;
-                            });
-                          } else if (_showAnimalsMenu || _showGeographyMenu) {
-                            // Animals/Geography goes directly to main menu
+                          // Deep submenus → go back to their parent category
+                          if (_showMathMenu) {
+                            // Equations → Math category
+                            setState(() => _showMathMenu = false);
+                          } else if (_showLettersMenu) {
+                            // Letters options → Language category
+                            setState(() => _showLettersMenu = false);
+                          } else if (_showAnimalsMenu || _showFoodsMenu) {
+                            // Animals/Foods options → Science category
                             setState(() {
                               _showAnimalsMenu = false;
-                              _showGeographyMenu = false;
-                              _showLearningMenu = false;
+                              _showFoodsMenu = false;
+                            });
+                          } else if (_showGeographyMenu) {
+                            // Geography options → Learning menu
+                            setState(() => _showGeographyMenu = false);
+                          } else if (_showMathCategoryMenu || _showLanguageMenu || _showScienceMenu) {
+                            // Category menus → Learning menu
+                            setState(() {
+                              _showMathCategoryMenu = false;
+                              _showLanguageMenu = false;
+                              _showScienceMenu = false;
                             });
                           } else if (_showBrainGamesMenu || _showLearningMenu) {
-                            // Go back to main games menu
+                            // Top-level menus → main games menu
                             setState(() {
                               _showBrainGamesMenu = false;
                               _showLearningMenu = false;
@@ -339,19 +365,40 @@ class _GamePageContentState extends State<GamePageContent> {
 
     // Show Learning submenu
     if (_showLearningMenu) {
-      // Check for nested submenus within Learning
-      if (_showMathMenu) {
-        return _buildMathSubMenu(context, voiceProvider, selectedCategory);
+      // Check for nested submenus within Learning categories
+
+      // Math category submenus
+      if (_showMathCategoryMenu) {
+        if (_showMathMenu) {
+          return _buildMathSubMenu(context, voiceProvider, selectedCategory);
+        }
+        return _buildMathCategorySubMenu(context, voiceProvider, selectedCategory);
       }
-      if (_showLettersMenu) {
-        return _buildLettersSubMenu(context, voiceProvider, selectedCategory);
+
+      // Language category submenus
+      if (_showLanguageMenu) {
+        if (_showLettersMenu) {
+          return _buildLettersSubMenu(context, voiceProvider, selectedCategory);
+        }
+        return _buildLanguageSubMenu(context, voiceProvider, selectedCategory);
       }
-      if (_showAnimalsMenu) {
-        return _buildAnimalsSubMenu(context, voiceProvider, selectedCategory);
+
+      // Science category submenus
+      if (_showScienceMenu) {
+        if (_showAnimalsMenu) {
+          return _buildAnimalsSubMenu(context, voiceProvider, selectedCategory);
+        }
+        if (_showFoodsMenu) {
+          return _buildFoodsSubMenu(context, voiceProvider, selectedCategory);
+        }
+        return _buildScienceSubMenu(context, voiceProvider, selectedCategory);
       }
+
+      // Geography submenu (direct from Learning)
       if (_showGeographyMenu) {
         return _buildGeographySubMenu(context, voiceProvider, selectedCategory);
       }
+
       return _buildLearningSubMenu(context, voiceProvider, selectedCategory);
     }
 
@@ -378,7 +425,7 @@ class _GamePageContentState extends State<GamePageContent> {
               icon: Icons.school,
               title: 'Learning',
               subtitle: 'Letters, numbers, shapes & more',
-              description: 'Learn the alphabet, practice counting, identify shapes, spell words out loud, solve math problems, and discover animals!',
+              description: 'Learn the alphabet, practice counting, identify shapes, spell words out loud, solve math problems, discover animals, and learn about foods!',
               isSelected: false,
               onTap: () => setState(() => _showLearningMenu = true),
             ),
@@ -477,16 +524,72 @@ class _GamePageContentState extends State<GamePageContent> {
         child: Column(
           children: [
             _MainMenuCard(
-              icon: Icons.abc,
-              title: 'Letters',
-              subtitle: 'Learn the alphabet',
-              description: 'Practice recognizing letters! See a letter on screen and say its name out loud. Choose uppercase, lowercase, or a random mix.',
-              isSelected: selectedCategory?.startsWith('letters') ?? false,
-              onTap: () => setState(() => _showLettersMenu = true),
+              icon: Icons.calculate,
+              title: 'Math',
+              subtitle: 'Numbers & equations',
+              description: 'Practice numbers, addition, subtraction, multiplication, and division. Build your math skills!',
+              isSelected: (selectedCategory?.startsWith('math') ?? false) || selectedCategory == 'numbers',
+              onTap: () => setState(() => _showMathCategoryMenu = true),
             ),
 
             const SizedBox(height: AppSpacing.lg),
 
+            _MainMenuCard(
+              icon: Icons.abc,
+              title: 'Language',
+              subtitle: 'Letters & spelling',
+              description: 'Learn the alphabet and practice spelling words. Perfect for building reading and writing skills!',
+              isSelected: (selectedCategory?.startsWith('letters') ?? false) || selectedCategory == 'spelling',
+              onTap: () => setState(() => _showLanguageMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _MainMenuCard(
+              icon: Icons.science,
+              title: 'Science',
+              subtitle: 'Animals & foods',
+              description: 'Discover amazing animals and learn about healthy foods! Fun facts about the natural world.',
+              isSelected: (selectedCategory?.startsWith('animals') ?? false) || (selectedCategory?.startsWith('foods') ?? false),
+              onTap: () => setState(() => _showScienceMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _MainMenuCard(
+              icon: Icons.public,
+              title: 'Geography',
+              subtitle: 'Learn about U.S. states',
+              description: 'Explore the United States! Learn about each state, their capitals, and fun facts.',
+              isSelected: selectedCategory?.startsWith('geography') ?? false,
+              onTap: () => setState(() => _showGeographyMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _MainMenuCard(
+              icon: Icons.category,
+              title: 'Shapes',
+              subtitle: 'Learn shapes',
+              description: 'Can you name that shape? Identify circles, squares, triangles, and more!',
+              isSelected: selectedCategory == 'shapes',
+              onTap: () => voiceProvider.selectLessonCategory('shapes'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Math category menu: Numbers, Equations
+  Widget _buildMathCategorySubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
             _MainMenuCard(
               icon: Icons.looks_one,
               title: 'Numbers',
@@ -499,12 +602,35 @@ class _GamePageContentState extends State<GamePageContent> {
             const SizedBox(height: AppSpacing.lg),
 
             _MainMenuCard(
-              icon: Icons.category,
-              title: 'Shapes',
-              subtitle: 'Learn shapes',
-              description: 'Can you name that shape? Look at the picture and use the clues to identify circles, squares, triangles, and more!',
-              isSelected: selectedCategory == 'shapes',
-              onTap: () => voiceProvider.selectLessonCategory('shapes'),
+              icon: Icons.calculate,
+              title: 'Equations',
+              subtitle: 'Practice arithmetic',
+              description: 'Solve math problems! Practice addition, subtraction, multiplication, and division.',
+              isSelected: selectedCategory?.startsWith('math') ?? false,
+              onTap: () => setState(() => _showMathMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Language category menu: Letters, Spelling
+  Widget _buildLanguageSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _MainMenuCard(
+              icon: Icons.abc,
+              title: 'Letters',
+              subtitle: 'Learn the alphabet',
+              description: 'Practice recognizing letters! Choose uppercase, lowercase, or a random mix.',
+              isSelected: selectedCategory?.startsWith('letters') ?? false,
+              onTap: () => setState(() => _showLettersMenu = true),
             ),
 
             const SizedBox(height: AppSpacing.lg),
@@ -513,29 +639,30 @@ class _GamePageContentState extends State<GamePageContent> {
               icon: Icons.spellcheck,
               title: 'Spelling',
               subtitle: 'Spell words out loud',
-              description: 'See a word and spell it out loud letter by letter. Great for building vocabulary and practicing phonics!',
+              description: 'See a word and spell it out loud letter by letter. Great for building vocabulary!',
               isSelected: selectedCategory == 'spelling',
               onTap: () => voiceProvider.selectLessonCategory('spelling'),
             ),
 
             const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
 
-            _MainMenuCard(
-              icon: Icons.calculate,
-              title: 'Math',
-              subtitle: 'Practice arithmetic',
-              description: 'Solve math problems! Practice addition, subtraction, multiplication, and division. Difficulty settings adjust the challenge.',
-              isSelected: selectedCategory?.startsWith('math') ?? false,
-              onTap: () => setState(() => _showMathMenu = true),
-            ),
-
-            const SizedBox(height: AppSpacing.lg),
-
+  /// Science category menu: Animals, Foods
+  Widget _buildScienceSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
             _MainMenuCard(
               icon: Icons.pets,
               title: 'Animals',
               subtitle: 'Learn about animals',
-              description: 'Discover amazing animals from around the world! Learn fun facts about mammals, birds, fish, reptiles, and more.',
+              description: 'Discover amazing animals from around the world! Learn fun facts about mammals, birds, fish, and more.',
               isSelected: selectedCategory?.startsWith('animals') ?? false,
               onTap: () => setState(() => _showAnimalsMenu = true),
             ),
@@ -543,12 +670,12 @@ class _GamePageContentState extends State<GamePageContent> {
             const SizedBox(height: AppSpacing.lg),
 
             _MainMenuCard(
-              icon: Icons.public,
-              title: 'US Geography',
-              subtitle: 'Learn about U.S. states',
-              description: 'Explore the United States! Learn about each state, their capitals, and fun facts. Can you find them on the map?',
-              isSelected: selectedCategory?.startsWith('geography') ?? false,
-              onTap: () => setState(() => _showGeographyMenu = true),
+              icon: Icons.restaurant,
+              title: 'Foods',
+              subtitle: 'Learn about foods',
+              description: 'Discover fruits, vegetables, grains, and more! Learn where foods come from.',
+              isSelected: selectedCategory?.startsWith('foods') ?? false,
+              onTap: () => setState(() => _showFoodsMenu = true),
             ),
 
             const SizedBox(height: AppSpacing.lg),
@@ -712,6 +839,50 @@ class _GamePageContentState extends State<GamePageContent> {
     );
   }
 
+  Widget _buildFoodsSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _AnimalOptionCard(
+              icon: Icons.school,
+              title: 'Lessons',
+              subtitle: 'Learn about foods',
+              description: 'See pictures and hear fun facts about fruits, vegetables, grains, dairy, and more! Discover where foods come from.',
+              isSelected: selectedCategory == 'foods:lessons',
+              onTap: () => voiceProvider.selectLessonCategory('foods:lessons'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _AnimalOptionCard(
+              icon: Icons.quiz,
+              title: 'Quiz',
+              subtitle: 'Test your knowledge',
+              description: 'See a food and try to name it! Listen to the clues and guess which food it is. How many can you get right?',
+              isSelected: selectedCategory == 'foods:quiz',
+              onTap: () => voiceProvider.selectLessonCategory('foods:quiz'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+
+            _AnimalOptionCard(
+              icon: Icons.shuffle,
+              title: 'Random',
+              subtitle: 'Mix it up',
+              description: 'A mix of lessons and quizzes! Sometimes you\'ll learn new facts, sometimes you\'ll guess the food. Keeps things exciting!',
+              isSelected: selectedCategory == 'foods:random',
+              onTap: () => voiceProvider.selectLessonCategory('foods:random'),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildGeographySubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -784,6 +955,11 @@ class _GamePageContentState extends State<GamePageContent> {
       return _buildAnimalsLessonDisplay(context, lessonState);
     } else if (lessonState.isAnimalsMode) {
       return _buildAnimalsQuizDisplay(context, lessonState, remainingSeconds);
+    } else if (lessonState.currentItem?.type == 'foods:lesson') {
+      // Check item type (not category) to handle foods:random mode correctly
+      return _buildFoodsLessonDisplay(context, lessonState);
+    } else if (lessonState.isFoodsMode) {
+      return _buildFoodsQuizDisplay(context, lessonState, remainingSeconds);
     } else if (lessonState.currentItem?.type == 'geography:lesson') {
       // Check item type (not category) to handle geography:random mode correctly
       return _buildGeographyLessonDisplay(context, lessonState);
@@ -850,6 +1026,13 @@ class _GamePageContentState extends State<GamePageContent> {
         return ("Let's learn about animals!", "I'll show you animals and tell you fun facts.");
       case 'animals:random':
         return ("Let's explore animals!", "Sometimes I'll quiz you, sometimes I'll teach you.");
+      case 'foods':
+      case 'foods:quiz':
+        return ("Let's learn about foods!", "I'll show you a food and describe it.");
+      case 'foods:lessons':
+        return ("Let's learn about foods!", "I'll show you foods and tell you fun facts.");
+      case 'foods:random':
+        return ("Let's explore foods!", "Sometimes I'll quiz you, sometimes I'll teach you.");
       case 'geography':
       case 'geography:quiz':
         return ("Let's learn U.S. states!", "I'll show you a state and give you clues.");
@@ -1490,6 +1673,190 @@ class _GamePageContentState extends State<GamePageContent> {
 
           // Big spacing between text and timer
           const SizedBox(height: 80),
+
+          // Timer during LISTEN phase, Answer during FEEDBACK phase
+          _buildTimerOrAnswer(context, lessonState),
+        ],
+      ),
+    );
+  }
+
+  /// Build food image widget (handles network images and fallback)
+  Widget _buildFoodImage(String? imageUrl) {
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return Container(
+        height: 200,
+        color: Colors.white.withOpacity(0.1),
+        child: Center(
+          child: Icon(
+            Icons.restaurant,
+            size: 80,
+            color: Colors.white.withOpacity(0.3),
+          ),
+        ),
+      );
+    }
+
+    // Check for cached local file (use food-specific cache)
+    final localPath = ImageCacheService.getFoodLocalPath(imageUrl);
+    if (localPath != null) {
+      return Image.file(
+        File(localPath),
+        width: double.infinity,
+        fit: BoxFit.fitWidth,
+        errorBuilder: (context, error, stackTrace) {
+          // Fall back to network if local file fails
+          return Image.network(
+            imageUrl,
+            width: double.infinity,
+            fit: BoxFit.fitWidth,
+            errorBuilder: (context, error, stackTrace) {
+              return Container(
+                height: 200,
+                color: Colors.white.withOpacity(0.1),
+                child: Center(
+                  child: Icon(
+                    Icons.restaurant,
+                    size: 80,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    }
+
+    // No cache - use network
+    return Image.network(
+      imageUrl,
+      width: double.infinity,
+      fit: BoxFit.fitWidth,
+      errorBuilder: (context, error, stackTrace) {
+        return Container(
+          height: 200,
+          color: Colors.white.withOpacity(0.1),
+          child: Center(
+            child: Icon(
+              Icons.restaurant,
+              size: 80,
+              color: Colors.white.withOpacity(0.3),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Foods Lesson display - image at top, name, then description
+  Widget _buildFoodsLessonDisplay(BuildContext context, LessonState lessonState) {
+    final description = lessonState.displayQuestion;
+    final foodName = lessonState.displayAnswer;
+    final imageUrl = lessonState.currentItem?.imageUrl;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Image - 80% width at top, centered
+          Center(
+            child: FractionallySizedBox(
+              widthFactor: 0.8,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildFoodImage(imageUrl),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Name under image
+          Text(
+            foodName,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.md),
+
+          // Description under name
+          Text(
+            description,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 20,
+              color: Colors.white.withOpacity(0.9),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Foods Quiz display - matches lesson style for image
+  Widget _buildFoodsQuizDisplay(BuildContext context, LessonState lessonState, int? remainingSeconds) {
+    final imageUrl = lessonState.currentItem?.imageUrl;
+
+    final isLarge = context.watch<GameSettingsProvider>().isLargeDisplay;
+    final promptFontSize = isLarge ? 36.0 : 28.0;
+    final progressFontSize = isLarge ? 22.0 : 16.0;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Progress indicator
+          if (lessonState.questionCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: Text(
+                lessonState.progressText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: progressFontSize,
+                  color: Colors.white.withOpacity(0.6),
+                ),
+              ),
+            ),
+
+          // Image - 80% width, centered (matches lesson style)
+          Center(
+            child: FractionallySizedBox(
+              widthFactor: 0.8,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildFoodImage(imageUrl),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
+
+          // Simple prompt - just ask "What food is this?"
+          Text(
+            'What food is this?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: promptFontSize,
+              fontWeight: FontWeight.w500,
+              color: Colors.white.withOpacity(0.9),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.lg),
 
           // Timer during LISTEN phase, Answer during FEEDBACK phase
           _buildTimerOrAnswer(context, lessonState),

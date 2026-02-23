@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/providers.dart';
+import '../providers/reports_provider.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
@@ -15,6 +16,7 @@ class DashboardPage extends StatelessWidget {
   final VoidCallback onEditAccountSettings;
   final VoidCallback onEditGameSettings;
   final VoidCallback onEditBrain;
+  final VoidCallback onEditReports;
 
   const DashboardPage({
     super.key,
@@ -25,6 +27,7 @@ class DashboardPage extends StatelessWidget {
     required this.onEditAccountSettings,
     required this.onEditGameSettings,
     required this.onEditBrain,
+    required this.onEditReports,
   });
 
   @override
@@ -125,19 +128,23 @@ class DashboardPage extends StatelessWidget {
               _UserProfileCard(onEdit: onEditUserProfile),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 3: Game Settings
+              // Card 3: Reports Settings
+              _ReportsCard(onEdit: onEditReports),
+              const SizedBox(height: AppSpacing.md),
+
+              // Card 4: Game Settings
               _GameSettingsCard(onEdit: onEditGameSettings),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 4: AI Service
+              // Card 5: AI Service
               _AIServiceCard(onEdit: onEditAIService),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 5: Brain
+              // Card 6: Brain Settings
               _BrainCard(onEdit: onEditBrain),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 6: Account Settings
+              // Card 7: Account Settings
               _AccountSettingsCard(onEdit: onEditAccountSettings),
               const SizedBox(height: AppSpacing.lg),
             ],
@@ -471,7 +478,7 @@ class _BrainCard extends StatelessWidget {
     return Consumer<OpenClawProvider>(
       builder: (context, provider, _) {
         return AppCard(
-          title: 'Brain',
+          title: 'Brain Settings',
           onEdit: onEdit,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -507,6 +514,98 @@ class _BrainCard extends StatelessWidget {
                     style: AppTextStyles.bodySmall,
                   ),
                 ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ReportsCard extends StatelessWidget {
+  final VoidCallback onEdit;
+
+  const _ReportsCard({required this.onEdit});
+
+  String _capitalize(String s) {
+    if (s.isEmpty) return s;
+    return s[0].toUpperCase() + s.substring(1).toLowerCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<ReportsProvider>(
+      builder: (context, reportsProvider, _) {
+        final schedules = reportsProvider.enabledSchedules;
+        final watchlist = reportsProvider.enabledWatchlist;
+
+        // Get unique main categories from watchlist (ignore subcategories for display)
+        final mainCategories = watchlist
+            .where((w) => w.subcategory == null)
+            .map((w) => _capitalize(w.category))
+            .toSet()
+            .toList()
+          ..sort();
+
+        return AppCard(
+          title: 'Reports Settings',
+          onEdit: onEdit,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Report Categories section
+              _DetailRow(
+                label: 'Report Categories',
+                value: mainCategories.isNotEmpty
+                    ? mainCategories.join(', ')
+                    : 'None selected',
+                compactSpacing: true,
+              ),
+
+              // Reports Schedule section
+              if (schedules.isEmpty)
+                _DetailRow(
+                  label: 'Reports Schedule',
+                  value: 'No schedules set',
+                  compactSpacing: true,
+                )
+              else
+                ...schedules.map((schedule) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: 120,
+                            child: Text(
+                              schedules.indexOf(schedule) == 0
+                                  ? 'Reports Schedule'
+                                  : '',
+                              style: AppTextStyles.label.copyWith(fontSize: 16),
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  schedule.categoryDisplay,
+                                  style: AppTextStyles.bodyMedium.copyWith(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${schedule.timeRangeDisplay} • ${schedule.daysDisplay} • ${schedule.frequency.displayName}',
+                                  style: AppTextStyles.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )),
             ],
           ),
         );

@@ -16,6 +16,7 @@ import 'dashboard/user_profile_edit_page.dart';
 import 'dashboard/account_settings_edit_page.dart';
 import 'dashboard/game_settings_edit_page.dart';
 import 'dashboard/brain_settings_page.dart';
+import 'dashboard/reports_settings_page.dart';
 import 'agents/agent_profiles_page.dart';
 import 'agents/edit_agent_page.dart';
 import 'personalities/personality_builder_page.dart';
@@ -220,9 +221,10 @@ class _AppNavigatorState extends State<AppNavigator> {
 
       debugPrint('Reminder scheduler started');
 
-      // Sync animal and face images in background (don't await - non-blocking)
+      // Sync animal, face, and food images in background (don't await - non-blocking)
       ImageCacheService.syncAnimalImages();
       ImageCacheService.syncFaceImages();
+      ImageCacheService.syncFoodImages();
     }
     
     if (mounted) {
@@ -311,6 +313,7 @@ enum MainRoute {
   accountSettings,
   gameSettings,
   brainSettings,
+  reportsSettings,
   agentProfiles,
   editAgent,
   personalityBuilder,
@@ -359,6 +362,7 @@ class _MainNavigatorState extends State<MainNavigator> {
           onEditAccountSettings: () => _push(MainRoute.accountSettings),
           onEditGameSettings: () => _push(MainRoute.gameSettings),
           onEditBrain: () => _push(MainRoute.brainSettings),
+          onEditReports: () => _push(MainRoute.reportsSettings),
         );
 
       case MainRoute.face:
@@ -412,6 +416,17 @@ class _MainNavigatorState extends State<MainNavigator> {
             if (!didPop) _pop();
           },
           child: BrainSettingsPage(
+            onBack: _pop,
+          ),
+        );
+
+      case MainRoute.reportsSettings:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: ReportsSettingsPage(
             onBack: _pop,
           ),
         );

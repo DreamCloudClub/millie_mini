@@ -1,81 +1,75 @@
-/// Represents an AI-generated report from Bubble's research
+/// Represents an AI-generated report from the news automation system
+/// Reports are GLOBAL - user-specific state (saved, announced) is in junction tables
 class Report {
   final String id;
-  final String userId;
   final String title;
   final String summary;        // Brief teaser for announcement
   final String content;        // Full report for "tell me more"
   final String category;       // e.g., "technology", "weather"
+  final String? subcategory;   // e.g., "ai", "robotics" (optional)
+  final List<String> topics;   // Keywords for filtering
+  final List<String> sourceArticleIds; // References to raw_articles used
+  final String? audioUrl;      // Cached TTS audio URL (generated on first play)
   final DateTime createdAt;
   final DateTime expiresAt;    // createdAt + 48hrs
-  final DateTime? announcedAt; // null = not yet announced
-  final DateTime? savedAt;     // null = live, set = saved
 
   Report({
     required this.id,
-    required this.userId,
     required this.title,
     required this.summary,
     required this.content,
     required this.category,
+    this.subcategory,
+    this.topics = const [],
+    this.sourceArticleIds = const [],
+    this.audioUrl,
     required this.createdAt,
     required this.expiresAt,
-    this.announcedAt,
-    this.savedAt,
   });
-
-  /// Create a new report for insertion (Supabase will generate UUID)
-  factory Report.create({
-    required String userId,
-    required String title,
-    required String summary,
-    required String content,
-    String category = 'general',
-    Duration expiresIn = const Duration(hours: 48),
-  }) {
-    final now = DateTime.now();
-    return Report(
-      id: '', // Supabase will generate UUID
-      userId: userId,
-      title: title,
-      summary: summary,
-      content: content,
-      category: category,
-      createdAt: now,
-      expiresAt: now.add(expiresIn),
-      announcedAt: null,
-      savedAt: null,
-    );
-  }
 
   /// Create from Supabase JSON
   factory Report.fromJson(Map<String, dynamic> json) {
+    // Parse source_article_ids from Postgres UUID array
+    List<String> sourceIds = [];
+    if (json['source_article_ids'] != null) {
+      sourceIds = (json['source_article_ids'] as List)
+          .map((e) => e.toString())
+          .toList();
+    }
+
+    // Parse topics from Postgres text array
+    List<String> topicsList = [];
+    if (json['topics'] != null) {
+      topicsList = (json['topics'] as List)
+          .map((e) => e.toString())
+          .toList();
+    }
+
     return Report(
       id: json['id'] as String,
-      userId: json['user_id'] as String,
       title: json['title'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
       content: json['content'] as String? ?? '',
       category: json['category'] as String? ?? 'general',
+      subcategory: json['subcategory'] as String?,
+      topics: topicsList,
+      sourceArticleIds: sourceIds,
+      audioUrl: json['audio_url'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
       expiresAt: DateTime.parse(json['expires_at'] as String),
-      announcedAt: json['announced_at'] != null
-          ? DateTime.parse(json['announced_at'] as String)
-          : null,
-      savedAt: json['saved_at'] != null
-          ? DateTime.parse(json['saved_at'] as String)
-          : null,
     );
   }
 
   /// Convert to JSON for Supabase insert (excludes id, let Supabase generate it)
   Map<String, dynamic> toInsertJson() {
     return {
-      'user_id': userId,
       'title': title,
       'summary': summary,
       'content': content,
       'category': category,
+      'subcategory': subcategory,
+      'topics': topics,
+      'source_article_ids': sourceArticleIds,
       'expires_at': expiresAt.toIso8601String(),
     };
   }
@@ -87,6 +81,8 @@ class Report {
       'summary': summary,
       'content': content,
       'category': category,
+      'subcategory': subcategory,
+      'topics': topics,
     };
   }
 
@@ -96,28 +92,33 @@ class Report {
     String? summary,
     String? content,
     String? category,
-    DateTime? announcedAt,
-    DateTime? savedAt,
+    String? subcategory,
+    List<String>? topics,
+    List<String>? sourceArticleIds,
+    String? audioUrl,
   }) {
     return Report(
       id: id,
-      userId: userId,
       title: title ?? this.title,
       summary: summary ?? this.summary,
       content: content ?? this.content,
       category: category ?? this.category,
+      subcategory: subcategory ?? this.subcategory,
+      topics: topics ?? this.topics,
+      sourceArticleIds: sourceArticleIds ?? this.sourceArticleIds,
+      audioUrl: audioUrl ?? this.audioUrl,
       createdAt: createdAt,
       expiresAt: expiresAt,
-      announcedAt: announcedAt ?? this.announcedAt,
-      savedAt: savedAt ?? this.savedAt,
     );
   }
 
-  /// Whether this report is saved (won't auto-delete)
-  bool get isSaved => savedAt != null;
-
-  /// Whether this report has been announced to the user
-  bool get isAnnounced => announcedAt != null;
+  /// Display label combining category and subcategory
+  String get categoryLabel {
+    if (subcategory != null && subcategory!.isNotEmpty) {
+      return '${category.toUpperCase()} / ${subcategory!.toUpperCase()}';
+    }
+    return category.toUpperCase();
+  }
 
   /// Whether this report has expired (only relevant for unsaved reports)
   bool get isExpired => DateTime.now().isAfter(expiresAt);

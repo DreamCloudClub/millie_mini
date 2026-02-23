@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../providers/providers.dart';
+import '../providers/reports_provider.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
 import '../services/services.dart';
 import '../services/reminder_scheduler_service.dart';
+import '../services/report_scheduler_service.dart';
 import '../services/note_tools_handler.dart';
 import '../game/game_page_content.dart';
 import '../face/face_page_content.dart';
@@ -61,7 +63,14 @@ class _ConversationPageState extends State<ConversationPage> {
     
     // Notify scheduler that we're on the face page
     ReminderSchedulerService.getInstance().setOnFacePage(true);
-    
+
+    // Start report scheduler (only runs when in conversation)
+    final reportScheduler = ReportSchedulerService.getInstance();
+    reportScheduler.setInConversation(true);
+    reportScheduler.setVoiceProvider(context.read<VoiceProvider>());
+    reportScheduler.setReportsProvider(context.read<ReportsProvider>());
+    reportScheduler.start();
+
     // Set up AI navigation callback
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupAINavigation();
@@ -158,10 +167,40 @@ class _ConversationPageState extends State<ConversationPage> {
       _reportsPageKey.currentState?.refreshReports();
     };
 
+    // Set up callback for triggering report check-in after navigation
+    voiceProvider.noteToolsHandler.onTriggerReportCheckIn = ({bool skipIntro = false}) {
+      debugPrint('AI triggered report check-in (skipIntro: $skipIntro)');
+      voiceProvider.triggerReportCheckIn(skipIntro: skipIntro);
+    };
+
+    // Set up callback for report filter changes (from tool)
+    voiceProvider.noteToolsHandler.onSetReportFilter = (filter) {
+      debugPrint('Tool triggered report filter change: $filter');
+      final filterEnum = switch (filter.toLowerCase()) {
+        'live' => ReportFilter.live,
+        'history' => ReportFilter.history,
+        'saved' => ReportFilter.saved,
+        _ => ReportFilter.live,
+      };
+      _reportsPageKey.currentState?.setFilter(filterEnum);
+    };
+
+    // Set up callback for report category changes (from tool)
+    voiceProvider.noteToolsHandler.onSetReportCategory = (category) {
+      debugPrint('Tool triggered report category change: $category');
+      _reportsPageKey.currentState?.setCategory(category);
+    };
+
     // Set up callback for game navigation
     voiceProvider.onNavigateToGame = () {
       debugPrint('Game navigation requested');
       _jumpToPage(gamePageIndex);
+    };
+
+    // Set up fallback callback for reports navigation (from AI marker detection)
+    voiceProvider.onNavigateToReports = () {
+      debugPrint('Reports navigation requested by AI (marker fallback)');
+      _jumpToPage(reportsPageIndex);
     };
 
     // Note: Game/lesson mode callbacks (onStartLessonMode, onExitLessonMode) are
@@ -211,7 +250,10 @@ class _ConversationPageState extends State<ConversationPage> {
     
     // Notify scheduler that we're leaving
     ReminderSchedulerService.getInstance().setOnFacePage(false);
-    
+
+    // Stop report scheduler (user leaving conversation)
+    ReportSchedulerService.getInstance().stop();
+
     // Disable wakelock
     WakelockPlus.disable();
     

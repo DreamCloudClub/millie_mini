@@ -290,7 +290,20 @@ class IntentRouter {
            lower.contains('save that') ||
            lower.contains('keep that') ||
            lower.contains('news') ||
-           lower.contains('research');
+           lower.contains('research') ||
+           // Filter detection
+           lower.contains('saved') ||
+           lower.contains('history') ||
+           lower.contains('live') ||
+           // Category detection
+           lower.contains('technology') ||
+           lower.contains('tech') ||
+           lower.contains('business') ||
+           lower.contains('sports') ||
+           lower.contains('entertainment') ||
+           lower.contains('science') ||
+           lower.contains('health') ||
+           lower.contains('politics');
   }
 
   /// Get tool names for given categories
@@ -353,6 +366,8 @@ class IntentRouter {
             'show_reports',
             'read_report',
             'save_report',
+            'set_report_filter',
+            'set_report_category',
           ]);
           break;
         case IntentCategory.none:

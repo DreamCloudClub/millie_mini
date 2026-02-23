@@ -6,18 +6,20 @@ import '../utils/constants.dart';
 /// Report card widget - taller than note cards with summary display
 class ReportCard extends StatelessWidget {
   final Report report;
+  final bool isSaved;
   final VoidCallback onOpen;
   final VoidCallback? onDelete;
   final VoidCallback? onSave;
-  final bool showSaveButton;
+  final VoidCallback? onRead;
 
   const ReportCard({
     super.key,
     required this.report,
+    this.isSaved = false,
     required this.onOpen,
     this.onDelete,
     this.onSave,
-    this.showSaveButton = true,
+    this.onRead,
   });
 
   String _formatRelativeTime(DateTime date) {
@@ -108,7 +110,7 @@ class ReportCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row: Category icon + Title + Open button + Delete button
+            // Header row: Category icon + Title + Save button + Open button + Delete button
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -141,6 +143,29 @@ class ReportCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                // Save/Unsave button (indicator + toggle)
+                if (onSave != null) ...[
+                  GestureDetector(
+                    onTap: onSave,
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: isSaved
+                            ? Colors.green.withOpacity(0.3)
+                            : Colors.white.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        isSaved ? Icons.bookmark : Icons.bookmark_outline,
+                        color: isSaved ? Colors.green : Colors.white.withOpacity(0.6),
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
                 // Open button
                 ElevatedButton(
                   onPressed: onOpen,
@@ -212,7 +237,7 @@ class ReportCard extends StatelessWidget {
 
             const SizedBox(height: AppSpacing.md),
 
-            // Footer: Timestamp + Save icon
+            // Footer: Category chip + Timestamp + Play button
             Row(
               children: [
                 // Category chip
@@ -226,7 +251,7 @@ class ReportCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    report.category,
+                    report.categoryLabel,
                     style: TextStyle(
                       fontFamily: AppTextStyles.fontFamily,
                       fontSize: 12,
@@ -246,52 +271,22 @@ class ReportCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                // Save button or Saved badge
-                if (report.isSaved)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.bookmark,
-                          size: 14,
-                          color: Colors.green.shade400,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Saved',
-                          style: TextStyle(
-                            fontFamily: AppTextStyles.fontFamily,
-                            fontSize: 12,
-                            color: Colors.green.shade400,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else if (showSaveButton && onSave != null)
+                // Play button (bottom right)
+                if (onRead != null)
                   GestureDetector(
-                    onTap: onSave,
+                    onTap: onRead,
                     child: Container(
-                      width: 32,
-                      height: 32,
+                      width: 36,
+                      height: 36,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
+                        color: Colors.green.withOpacity(0.3),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(
-                        Icons.bookmark_outline,
-                        color: Colors.white.withOpacity(0.6),
-                        size: 18,
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.volume_up,
+                        color: Colors.green,
+                        size: 20,
                       ),
                     ),
                   ),

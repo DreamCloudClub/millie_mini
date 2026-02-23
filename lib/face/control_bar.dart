@@ -66,8 +66,8 @@ class ControlBar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // First button: Skip (on game page) or Refresh (otherwise)
-              if (onSkip != null)
+              // First button: Skip (when game is running) or Refresh (on menu/other pages)
+              if (isGameRunning && onSkip != null)
                 _ControlButton(
                   icon: Icons.skip_next,
                   label: 'Skip',
@@ -77,7 +77,7 @@ class ControlBar extends StatelessWidget {
               else
                 _ControlButton(
                   icon: Icons.refresh,
-                  label: 'Refresh',
+                  label: 'Reset',
                   onTap: onRefresh,
                   buttonColor: Colors.green,
                 ),

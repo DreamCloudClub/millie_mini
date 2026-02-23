@@ -84,6 +84,10 @@ class NoteToolsHandler {
 
   Note? get activeNote => _activeNote;
 
+  /// Forced intents - these will always be included regardless of detected intent
+  /// Used for page-specific tool loading (e.g., reports tools when on Reports page)
+  Set<IntentCategory> forcedIntents = {};
+
   /// Set the reminder provider (injected from VoiceProvider)
   void setReminderProvider(ReminderProvider provider) {
     _reminderProvider = provider;
@@ -138,6 +142,16 @@ class NoteToolsHandler {
 
   /// Callback when reports list should be refreshed
   VoidCallback? onReportsListChanged;
+
+  /// Callback to trigger report check-in after navigating to reports
+  /// [skipIntro] - pass true when coming from voice nav (already talking)
+  void Function({bool skipIntro})? onTriggerReportCheckIn;
+
+  /// Callback to change report filter (Live, History, Saved)
+  void Function(String filter)? onSetReportFilter;
+
+  /// Callback to change report category
+  void Function(String? category)? onSetReportCategory;
 
   /// Callback to start lesson mode (FSM-controlled)
   Future<void> Function(String category)? onStartLessonMode;
@@ -606,7 +620,7 @@ class NoteToolsHandler {
       'type': 'function',
       'function': {
         'name': 'show_reports',
-        'description': 'Navigate to the AI Reports page to show all reports. Use when user wants to see their AI reports, news, or research findings.',
+        'description': 'Navigate to the AI Reports page. Use when user wants to see their reports, news, or research.',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -645,6 +659,41 @@ class NoteToolsHandler {
             },
           },
           'required': [],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'set_report_filter',
+        'description': 'Switch between report views: Live (new), History (previously viewed), or Saved (bookmarked). Use when user says "show saved reports", "show history", etc.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'filter': {
+              'type': 'string',
+              'enum': ['live', 'history', 'saved'],
+              'description': 'The filter: live, history, or saved',
+            },
+          },
+          'required': ['filter'],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'set_report_category',
+        'description': 'Filter reports by category. Use when user says "show technology reports", "filter by sports", etc.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'category': {
+              'type': 'string',
+              'description': 'Category name (technology, business, sports, etc.) or "all" for all categories',
+            },
+          },
+          'required': ['category'],
         },
       },
     },
@@ -756,6 +805,10 @@ class NoteToolsHandler {
         return await _readReport(toolCall.arguments);
       case 'save_report':
         return await _saveReport(toolCall.arguments);
+      case 'set_report_filter':
+        return _setReportFilter(toolCall.arguments);
+      case 'set_report_category':
+        return _setReportCategory(toolCall.arguments);
       // Capability request (triggers retry with requested tools)
       case 'request_capability':
         return _requestCapability(toolCall.arguments);
@@ -1830,9 +1883,20 @@ class NoteToolsHandler {
   AIToolResult _showReports() {
     onNavigate?.call(AINavigationTarget.reports);
 
+    // Trigger report check-in after a short delay for navigation
+    // skipIntro: true because we're already in a voice conversation
+    if (onTriggerReportCheckIn != null) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        onTriggerReportCheckIn!(skipIntro: true);
+      });
+    }
+
+    // Pause so the check-in can take over
+    _shouldPauseAfterResponse = true;
+
     return AIToolResult(
       success: true,
-      message: 'Here are your AI reports.',
+      message: 'Opening your reports now.',
     );
   }
 
@@ -1911,6 +1975,66 @@ class NoteToolsHandler {
         message: 'Failed to save the report. Please try again.',
       );
     }
+  }
+
+  /// Set report filter (Live, History, Saved)
+  AIToolResult _setReportFilter(Map<String, dynamic> args) {
+    final filter = args['filter'] as String? ?? 'live';
+
+    // Navigate to reports if not already there
+    onNavigate?.call(AINavigationTarget.reports);
+
+    // Directly call the filter change callback
+    onSetReportFilter?.call(filter.toLowerCase());
+
+    final filterLabel = switch (filter.toLowerCase()) {
+      'live' => 'Live',
+      'history' => 'History',
+      'saved' => 'Saved',
+      _ => 'Live',
+    };
+
+    // Trigger check-in after filter change (skipIntro since we're in conversation)
+    if (onTriggerReportCheckIn != null) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        onTriggerReportCheckIn!(skipIntro: true);
+      });
+    }
+    _shouldPauseAfterResponse = true;
+
+    return AIToolResult(
+      success: true,
+      message: 'Switching to $filterLabel reports.',
+    );
+  }
+
+  /// Set report category filter (All, Technology, etc.)
+  AIToolResult _setReportCategory(Map<String, dynamic> args) {
+    final category = args['category'] as String? ?? 'all';
+
+    // Navigate to reports if not already there
+    onNavigate?.call(AINavigationTarget.reports);
+
+    // Directly call the category change callback
+    final categoryValue = category.toLowerCase() == 'all' ? null : category;
+    onSetReportCategory?.call(categoryValue);
+
+    final categoryLabel = category.toLowerCase() == 'all'
+        ? 'all categories'
+        : category;
+
+    // Trigger check-in after category change (skipIntro since we're in conversation)
+    if (onTriggerReportCheckIn != null) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        onTriggerReportCheckIn!(skipIntro: true);
+      });
+    }
+    _shouldPauseAfterResponse = true;
+
+    return AIToolResult(
+      success: true,
+      message: 'Showing $categoryLabel.',
+    );
   }
 
   /// Helper to format time for display
@@ -2081,10 +2205,11 @@ User can resume by tapping play or double-tapping.''';
 
   String _getReportsInstructions() {
     return '''AI REPORTS:
-- "tell me more" / "read it" / "what else" → use read_report (reads full content of last announced report)
-- "save that" / "keep that report" → use save_report (prevents auto-deletion)
-- "show my reports" / "what reports do I have" → use show_reports (navigates to reports page)
-CONTEXT: After announcing a report, user may say "tell me more" to hear the full content.''';
+- "show my reports" → use show_reports
+- "tell me more" / "read it" → use read_report
+- "save that" → use save_report
+- "show saved/history" → use set_report_filter with filter parameter
+- "show technology reports" → use set_report_category with category parameter''';
   }
 }
 
