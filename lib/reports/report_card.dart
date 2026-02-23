@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../models/models.dart';
+import '../providers/reports_provider.dart';
 import '../utils/constants.dart';
 
-/// Report card widget - taller than note cards with summary display
+/// Report card widget - horizontal layout with image on left
 class ReportCard extends StatelessWidget {
   final Report report;
   final bool isSaved;
@@ -11,6 +13,7 @@ class ReportCard extends StatelessWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onSave;
   final VoidCallback? onRead;
+  final VoidCallback? onSkip;
 
   const ReportCard({
     super.key,
@@ -20,6 +23,7 @@ class ReportCard extends StatelessWidget {
     this.onDelete,
     this.onSave,
     this.onRead,
+    this.onSkip,
   });
 
   String _formatRelativeTime(DateTime date) {
@@ -61,6 +65,10 @@ class ReportCard extends StatelessWidget {
         return Icons.health_and_safety;
       case 'politics':
         return Icons.account_balance;
+      case 'kids':
+        return Icons.child_care;
+      case 'lifestyle':
+        return Icons.spa;
       default:
         return Icons.article;
     }
@@ -86,6 +94,10 @@ class ReportCard extends StatelessWidget {
         return Colors.red;
       case 'politics':
         return Colors.indigo;
+      case 'kids':
+        return Colors.orange;
+      case 'lifestyle':
+        return Colors.pink;
       default:
         return Colors.grey;
     }
@@ -94,9 +106,16 @@ class ReportCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final categoryColor = _getCategoryColor();
+    final displaySize = context.watch<ReportsProvider>().displaySize;
+    final isLarge = displaySize == DisplaySize.large;
+    final hasImage = report.imageUrl != null && report.imageUrl!.isNotEmpty;
+
+    // Calculate square image size (1/3 of screen width)
+    final imageSize = MediaQuery.of(context).size.width * 0.33;
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      height: imageSize, // Card height matches image for square
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(16),
@@ -105,196 +124,272 @@ class ReportCard extends StatelessWidget {
           width: 1,
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header row: Category icon + Title + Save button + Open button + Delete button
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Category icon in colored circle
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: categoryColor.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    _getCategoryIcon(),
-                    color: categoryColor,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                // Title (expanded)
-                Expanded(
-                  child: Text(
-                    report.title.isEmpty ? 'Untitled Report' : report.title,
-                    style: const TextStyle(
-                      fontFamily: AppTextStyles.fontFamily,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Left: Square image
+          SizedBox(
+            width: imageSize,
+            height: imageSize,
+            child: Stack(
+                children: [
+                  // Image
+                  if (hasImage)
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(15),
+                          bottomLeft: Radius.circular(15),
+                        ),
+                        child: Image.network(
+                          report.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Container(
+                                color: categoryColor.withOpacity(0.2),
+                                child: Icon(
+                                  _getCategoryIcon(),
+                                  color: categoryColor,
+                                  size: 40,
+                                ),
+                              ),
+                        ),
+                      ),
+                    )
+                  else
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(15),
+                          bottomLeft: Radius.circular(15),
+                        ),
+                        child: Container(
+                          color: categoryColor.withOpacity(0.2),
+                          child: Icon(
+                            _getCategoryIcon(),
+                            color: categoryColor,
+                            size: 40,
+                          ),
+                        ),
+                      ),
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                // Save/Unsave button (indicator + toggle)
-                if (onSave != null) ...[
-                  GestureDetector(
-                    onTap: onSave,
+
+                  // Category icon at top-left
+                  Positioned(
+                    left: 8,
+                    top: 8,
                     child: Container(
-                      width: 36,
-                      height: 36,
+                      width: 28,
+                      height: 28,
                       decoration: BoxDecoration(
-                        color: isSaved
-                            ? Colors.green.withOpacity(0.3)
-                            : Colors.white.withOpacity(0.1),
+                        color: categoryColor,
                         shape: BoxShape.circle,
                       ),
-                      alignment: Alignment.center,
                       child: Icon(
-                        isSaved ? Icons.bookmark : Icons.bookmark_outline,
-                        color: isSaved ? Colors.green : Colors.white.withOpacity(0.6),
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                ],
-                // Open button
-                ElevatedButton(
-                  onPressed: onOpen,
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: categoryColor,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md,
-                      vertical: AppSpacing.sm,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    minimumSize: const Size(60, 36),
-                    elevation: 0,
-                  ),
-                  child: const Text(
-                    'Open',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                // Delete button (if provided)
-                if (onDelete != null) ...[
-                  const SizedBox(width: AppSpacing.sm),
-                  GestureDetector(
-                    onTap: onDelete,
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryOrange.withOpacity(0.7),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: const Icon(
-                        Icons.delete,
+                        _getCategoryIcon(),
                         color: Colors.white,
-                        size: 20,
+                        size: 16,
                       ),
                     ),
                   ),
                 ],
-              ],
-            ),
-
-            const SizedBox(height: AppSpacing.md),
-
-            // Divider
-            Container(
-              height: 1,
-              color: Colors.white.withOpacity(0.1),
-            ),
-
-            const SizedBox(height: AppSpacing.md),
-
-            // Summary text (3-4 lines max)
-            if (report.summary.isNotEmpty)
-              Text(
-                report.summary,
-                style: TextStyle(
-                  fontFamily: AppTextStyles.fontFamily,
-                  fontSize: 14,
-                  color: Colors.white.withOpacity(0.8),
-                  height: 1.4,
-                ),
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
               ),
+            ),
 
-            const SizedBox(height: AppSpacing.md),
-
-            // Footer: Category chip + Timestamp + Play button
-            Row(
-              children: [
-                // Category chip
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: categoryColor.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    report.categoryLabel,
-                    style: TextStyle(
-                      fontFamily: AppTextStyles.fontFamily,
-                      fontSize: 12,
-                      color: categoryColor,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                // Timestamp
-                Text(
-                  _formatRelativeTime(report.createdAt),
-                  style: TextStyle(
-                    fontFamily: AppTextStyles.fontFamily,
-                    fontSize: 12,
-                    color: Colors.white.withOpacity(0.5),
-                  ),
-                ),
-                const Spacer(),
-                // Play button (bottom right)
-                if (onRead != null)
-                  GestureDetector(
-                    onTap: onRead,
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.3),
-                        shape: BoxShape.circle,
+            // Right: Content
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title
+                    Text(
+                      report.title.isEmpty ? 'Untitled Report' : report.title,
+                      style: TextStyle(
+                        fontFamily: AppTextStyles.fontFamily,
+                        fontSize: isLarge ? 19 : 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
                       ),
-                      alignment: Alignment.center,
-                      child: const Icon(
-                        Icons.volume_up,
-                        color: Colors.green,
-                        size: 20,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+
+                    const SizedBox(height: AppSpacing.sm),
+
+                    // Summary text
+                    if (report.summary.isNotEmpty)
+                      Expanded(
+                        child: Text(
+                          report.summary,
+                          style: TextStyle(
+                            fontFamily: AppTextStyles.fontFamily,
+                            fontSize: isLarge ? 17 : 13,
+                            color: Colors.white.withOpacity(0.7),
+                            height: 1.3,
+                          ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+
+                    const SizedBox(height: AppSpacing.sm),
+
+                    // Timestamp
+                    Text(
+                      _formatRelativeTime(report.publishedAt ?? report.createdAt),
+                      style: TextStyle(
+                        fontFamily: AppTextStyles.fontFamily,
+                        fontSize: 10,
+                        color: Colors.white.withOpacity(0.5),
                       ),
                     ),
-                  ),
-              ],
+
+                    const SizedBox(height: AppSpacing.sm),
+
+                    // Bottom row: Category label (left) + Buttons (right)
+                    Row(
+                      children: [
+                        // Category chip (left)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: categoryColor.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            report.categoryLabel,
+                            style: TextStyle(
+                              fontFamily: AppTextStyles.fontFamily,
+                              fontSize: 10,
+                              color: categoryColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+
+                        const Spacer(),
+
+                        // Play button (bright green)
+                        if (onRead != null) ...[
+                          GestureDetector(
+                            onTap: onRead,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: const BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: const Icon(
+                                Icons.play_arrow,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                        ],
+
+                        // Skip button (bright orange)
+                        if (onSkip != null) ...[
+                          GestureDetector(
+                            onTap: onSkip,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: const BoxDecoration(
+                                color: AppColors.primaryOrange,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: const Icon(
+                                Icons.skip_next,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                        ],
+
+                        // Open button (blue)
+                        ElevatedButton(
+                          onPressed: onOpen,
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.blue,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.md,
+                              vertical: 6,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            minimumSize: const Size(50, 28),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            'Open',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+
+                        // Save button (green with white icon)
+                        if (onSave != null) ...[
+                          GestureDetector(
+                            onTap: onSave,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: const BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                isSaved ? Icons.bookmark : Icons.bookmark_outline,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                        ],
+
+                        // Delete button (orange)
+                        if (onDelete != null)
+                          GestureDetector(
+                            onTap: onDelete,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: const BoxDecoration(
+                                color: AppColors.primaryOrange,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
-      ),
     );
   }
 }

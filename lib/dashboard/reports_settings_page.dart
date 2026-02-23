@@ -98,6 +98,13 @@ class ReportsSettingsPage extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.md),
 
+                // Display Size Card
+                _DisplaySizeCard(
+                  displaySize: provider.displaySize,
+                  onChanged: (size) => provider.updateDisplaySize(size),
+                ),
+                const SizedBox(height: AppSpacing.md),
+
                 // Schedules Card (for verbal announcements)
                 _SchedulesCard(
                   schedules: provider.schedules,
@@ -220,41 +227,22 @@ class _CategoriesCardState extends State<_CategoriesCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header
-          Row(
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppColors.dreamCloudBlue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.article_outlined,
-                  color: AppColors.dreamCloudBlue,
+              Text(
+                'Report Categories',
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
                 ),
               ),
-              const SizedBox(width: AppSpacing.md),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Report Categories',
-                      style: TextStyle(
-                        fontFamily: AppTextStyles.fontFamily,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Select categories to show in your feed',
-                      style: AppTextStyles.bodySmall,
-                    ),
-                  ],
-                ),
+              SizedBox(height: 4),
+              Text(
+                'Select categories to show in your feed',
+                style: AppTextStyles.bodySmall,
               ),
             ],
           ),
@@ -370,6 +358,56 @@ class _CategoriesCardState extends State<_CategoriesCard> {
   }
 }
 
+/// Card for selecting display size (font size)
+class _DisplaySizeCard extends StatelessWidget {
+  final DisplaySize displaySize;
+  final ValueChanged<DisplaySize> onChanged;
+
+  const _DisplaySizeCard({
+    required this.displaySize,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppBorderRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Dropdown
+          AppDropdown<DisplaySize>(
+            label: 'Display Size',
+            value: displaySize,
+            items: DisplaySize.values
+                .map((d) => DropdownMenuItem(
+                      value: d,
+                      child: Text(d.displayName),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) {
+                onChanged(value);
+              }
+            },
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            displaySize == DisplaySize.large
+                ? 'Larger text for easier reading.'
+                : 'Standard text size.',
+            style: AppTextStyles.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Card for managing verbal announcement schedules
 class _SchedulesCard extends StatelessWidget {
   final List<CategorySchedule> schedules;
@@ -401,19 +439,6 @@ class _SchedulesCard extends StatelessWidget {
             padding: const EdgeInsets.all(AppSpacing.lg),
             child: Row(
               children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.schedule,
-                    color: Colors.orange,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
                 const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

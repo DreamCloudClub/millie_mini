@@ -155,7 +155,7 @@ class DashboardPage extends StatelessWidget {
   }
 }
 
-class _AgentProfileCard extends StatelessWidget {
+class _AgentProfileCard extends StatefulWidget {
   final VoidCallback onEdit;
   final VoidCallback onLaunch;
 
@@ -163,6 +163,14 @@ class _AgentProfileCard extends StatelessWidget {
     required this.onEdit,
     required this.onLaunch,
   });
+
+  @override
+  State<_AgentProfileCard> createState() => _AgentProfileCardState();
+}
+
+class _AgentProfileCardState extends State<_AgentProfileCard> {
+  int _displayIndex = 0;
+  bool _initialized = false;
 
   Future<void> _handleLaunch(
     BuildContext context,
@@ -184,7 +192,7 @@ class _AgentProfileCard extends StatelessWidget {
             userEmail: userEmail,
             subscriptionStatus: aiService.status,
           );
-          
+
           final tokensUsed = usageInfo['tokens_used'] as int? ?? 0;
           final tokenLimit = usageInfo['token_limit'] as int? ?? 0;
           final tokensRemaining = usageInfo['tokens_remaining'] as int? ?? 0;
@@ -236,58 +244,191 @@ class _AgentProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer3<AgentProvider, PersonalityProvider, AIServiceProvider>(
       builder: (context, agentProvider, personalityProvider, aiServiceProvider, _) {
-        final agent = agentProvider.activeAgent;
-        if (agent == null) {
+        final agents = agentProvider.agents;
+        final activeAgent = agentProvider.activeAgent;
+
+        if (agents.isEmpty || activeAgent == null) {
           return const SizedBox.shrink();
         }
 
+        // Initialize display index to active agent on first build
+        if (!_initialized) {
+          final activeIndex = agents.indexWhere((a) => a.id == activeAgent.id);
+          if (activeIndex != -1) {
+            _displayIndex = activeIndex;
+          }
+          _initialized = true;
+        }
+
+        // Clamp display index to valid range
+        if (_displayIndex >= agents.length) {
+          _displayIndex = agents.length - 1;
+        }
+
+        final agent = agents[_displayIndex];
         final personality = personalityProvider.getPersonalityById(agent.personalityId);
-        final aiService = aiServiceProvider.getServiceById(agent.aiServiceId);
+
+        void goToPrevious() {
+          setState(() {
+            _displayIndex = (_displayIndex - 1 + agents.length) % agents.length;
+          });
+        }
+
+        void goToNext() {
+          setState(() {
+            _displayIndex = (_displayIndex + 1) % agents.length;
+          });
+        }
+
+        void goToIndex(int index) {
+          if (index >= 0 && index < agents.length) {
+            setState(() {
+              _displayIndex = index;
+            });
+          }
+        }
+
+        // Calculate face size based on screen width
+        final screenWidth = MediaQuery.of(context).size.width;
+        final availableWidth = screenWidth - 32 - 16;
+        final faceSize = (availableWidth - 96) * 0.75;
 
         return AppCard(
           title: 'Agent Profile',
-          onEdit: onEdit,
+          onEdit: widget.onEdit,
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, AppSpacing.lg),
           child: Column(
             children: [
-              // Face Preview
-              Center(
-                child: FacePreview(
-                  faceColor: agent.faceColor,
-                  eyeShape: agent.eyeShape,
-                  faceImageId: agent.faceImageId,
-                  customFaceId: agent.customFaceId,
-                  size: 280, // 2x larger
+              // Agent display with arrows
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Left arrow
+                  if (agents.length > 1)
+                    GestureDetector(
+                      onTap: goToPrevious,
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.dreamCloudBlue.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.chevron_left,
+                          color: AppColors.dreamCloudBlue,
+                          size: 28,
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 40),
+
+                  const SizedBox(width: 16),
+
+                  // Agent info
+                  SizedBox(
+                    width: faceSize,
+                    child: Column(
+                      children: [
+                        // Face Preview
+                        FacePreview(
+                          faceColor: agent.faceColor,
+                          eyeShape: agent.eyeShape,
+                          faceImageId: agent.faceImageId,
+                          customFaceId: agent.customFaceId,
+                          size: faceSize,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        // Agent name
+                        Text(
+                          agent.name,
+                          style: const TextStyle(
+                            fontFamily: AppTextStyles.fontFamily,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        // Voice + Personality
+                        Text(
+                          '${agent.voice} • ${personality?.name ?? 'Home'}',
+                          style: AppTextStyles.bodySmall.copyWith(
+                            fontSize: 16,
+                            color: AppColors.textLight,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(width: 16),
+
+                  // Right arrow
+                  if (agents.length > 1)
+                    GestureDetector(
+                      onTap: goToNext,
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.dreamCloudBlue.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.chevron_right,
+                          color: AppColors.dreamCloudBlue,
+                          size: 28,
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 40),
+                ],
+              ),
+
+              // Page indicator dots
+              if (agents.length > 1) ...[
+                const SizedBox(height: AppSpacing.md),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(agents.length, (index) {
+                    return GestureDetector(
+                      onTap: () => goToIndex(index),
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: index == _displayIndex
+                              ? AppColors.dreamCloudBlue
+                              : AppColors.textLight.withValues(alpha: 0.3),
+                        ),
+                      ),
+                    );
+                  }),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              // Agent details
-              _DetailRow(
-                label: 'Name',
-                value: agent.name,
-                compactSpacing: true,
-              ),
-              _DetailRow(
-                label: 'Voice',
-                value: agent.voice,
-                compactSpacing: true,
-              ),
-              _DetailRow(
-                label: 'Personality',
-                value: personality?.name ?? 'Home',
-                compactSpacing: true,
-              ),
-              if (aiService != null)
-                _DetailRow(
-                  label: 'AI Service',
-                  value: aiService.displayName,
-                  compactSpacing: true,
+              ],
+
+              const SizedBox(height: AppSpacing.lg),
+
+              // Launch button - activates and launches displayed agent
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                child: AppButton(
+                  label: 'Launch',
+                  onPressed: () {
+                    // Activate this agent then launch
+                    agentProvider.setActiveAgent(agent.id);
+                    final aiService = aiServiceProvider.getServiceById(agent.aiServiceId);
+                    _handleLaunch(context, aiService, widget.onLaunch);
+                  },
+                  isFullWidth: true,
                 ),
-              const SizedBox(height: AppSpacing.xl),
-              // Launch button
-              AppButton(
-                label: 'Launch',
-                onPressed: () => _handleLaunch(context, aiService, onLaunch),
-                isFullWidth: true,
               ),
             ],
           ),
@@ -553,19 +694,19 @@ class _ReportsCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Report Categories section
+              // Categories section
               _DetailRow(
-                label: 'Report Categories',
+                label: 'Categories',
                 value: mainCategories.isNotEmpty
                     ? mainCategories.join(', ')
                     : 'None selected',
                 compactSpacing: true,
               ),
 
-              // Reports Schedule section
+              // Schedule section
               if (schedules.isEmpty)
                 _DetailRow(
-                  label: 'Reports Schedule',
+                  label: 'Schedule',
                   value: 'No schedules set',
                   compactSpacing: true,
                 )
@@ -579,7 +720,7 @@ class _ReportsCard extends StatelessWidget {
                             width: 120,
                             child: Text(
                               schedules.indexOf(schedule) == 0
-                                  ? 'Reports Schedule'
+                                  ? 'Schedule'
                                   : '',
                               style: AppTextStyles.label.copyWith(fontSize: 16),
                             ),

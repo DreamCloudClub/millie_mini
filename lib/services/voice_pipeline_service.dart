@@ -845,15 +845,22 @@ class VoicePipelineService {
   /// Pause continuous mode (stop recording but keep context)
   Future<void> pauseContinuousMode() async {
     _isPaused = true;
+    _audioForceStopped = true; // Stop any ongoing playback callbacks
     _isProcessing = false; // Reset processing flag when pausing
     _isStopping = false; // Reset stopping flag to prevent stale state
     debugPrint('Pausing continuous mode...');
-    
+
+    // Complete any pending audio playback completer
+    if (_audioPlaybackCompleter != null && !_audioPlaybackCompleter!.isCompleted) {
+      _audioPlaybackCompleter!.complete();
+      _audioPlaybackCompleter = null;
+    }
+
     // Cancel all timers
     _amplitudeSubscription?.cancel();
     _silenceTimer?.cancel();
     _maxRecordingTimer?.cancel();
-    
+
     // Stop audio playback
     if (_isPlaying) {
       try {
@@ -861,9 +868,10 @@ class VoicePipelineService {
         _isPlaying = false;
       } catch (e) {
         debugPrint('Error stopping audio: $e');
+        _isPlaying = false;
       }
     }
-    
+
     // Stop recording
     if (_isRecording) {
       try {
@@ -883,12 +891,13 @@ class VoicePipelineService {
   /// Resume continuous mode (restart listening)
   Future<void> resumeContinuousMode() async {
     if (!_isContinuousMode) return;
-    
+
     _isPaused = false;
+    _audioForceStopped = false; // Reset force stop flag for new activity
     _isProcessing = false; // Reset processing flag when resuming
     _isStopping = false; // Reset stopping flag to ensure clean state
     stopWakeWordDetection();
-    
+
     // Restart listening
     if (!_isRecording) {
       await startListening(
@@ -905,7 +914,7 @@ class VoicePipelineService {
         getConversationHistory: _getConversationHistory,
       );
     }
-    
+
     debugPrint('Continuous mode resumed');
   }
   
@@ -1347,6 +1356,10 @@ class VoicePipelineService {
   Future<String?> generateAndPlayTTS(String text, String voice) async {
     try {
       debugPrint('Generating TTS for caching: ${text.substring(0, text.length > 50 ? 50 : text.length)}...');
+
+      // Reset force stop flag for new playback
+      _audioForceStopped = false;
+
       onStateChange?.call(VoiceState.speaking);
 
       final audioPath = await _textToSpeech(text, voice);
@@ -1355,14 +1368,21 @@ class VoicePipelineService {
         return null;
       }
 
+      // Check if force stopped during generation
+      if (_audioForceStopped) {
+        debugPrint('TTS aborted - force stopped during generation');
+        return audioPath; // Return path but don't play
+      }
+
       // Play the audio
       try { await _player.stop(); } catch (_) {}
       _isPlaying = true;
 
       final completer = Completer<void>();
+      _audioPlaybackCompleter = completer;
       StreamSubscription<void>? subscription;
       subscription = _player.onPlayerComplete.listen((_) {
-        if (!completer.isCompleted) {
+        if (!completer.isCompleted && !_audioForceStopped) {
           completer.complete();
           subscription?.cancel();
         }
@@ -1373,13 +1393,19 @@ class VoicePipelineService {
         subscription?.cancel();
       });
 
+      _audioPlaybackCompleter = null;
       _isPlaying = false;
-      onStateChange?.call(VoiceState.paused);
-      debugPrint('TTS playback complete, file at: $audioPath');
+
+      // Only transition to paused if not force stopped
+      if (!_audioForceStopped) {
+        onStateChange?.call(VoiceState.paused);
+        debugPrint('TTS playback complete, file at: $audioPath');
+      }
 
       return audioPath;
     } catch (e) {
       debugPrint('Error generating/playing TTS: $e');
+      _audioPlaybackCompleter = null;
       _isPlaying = false;
       return null;
     }
@@ -1389,15 +1415,20 @@ class VoicePipelineService {
   Future<void> playAudioFromUrl(String url) async {
     try {
       debugPrint('Playing audio from URL: $url');
+
+      // Reset force stop flag for new playback
+      _audioForceStopped = false;
+
       onStateChange?.call(VoiceState.speaking);
 
       try { await _player.stop(); } catch (_) {}
       _isPlaying = true;
 
       final completer = Completer<void>();
+      _audioPlaybackCompleter = completer;
       StreamSubscription<void>? subscription;
       subscription = _player.onPlayerComplete.listen((_) {
-        if (!completer.isCompleted) {
+        if (!completer.isCompleted && !_audioForceStopped) {
           completer.complete();
           subscription?.cancel();
         }
@@ -1408,13 +1439,21 @@ class VoicePipelineService {
         subscription?.cancel();
       });
 
+      _audioPlaybackCompleter = null;
       _isPlaying = false;
-      onStateChange?.call(VoiceState.paused);
-      debugPrint('URL audio playback complete');
+
+      // Only transition to paused if not force stopped
+      if (!_audioForceStopped) {
+        onStateChange?.call(VoiceState.paused);
+        debugPrint('URL audio playback complete');
+      }
     } catch (e) {
       debugPrint('Error playing audio from URL: $e');
+      _audioPlaybackCompleter = null;
       _isPlaying = false;
-      onStateChange?.call(VoiceState.paused);
+      if (!_audioForceStopped) {
+        onStateChange?.call(VoiceState.paused);
+      }
       rethrow;
     }
   }
@@ -2326,132 +2365,28 @@ Format note content nicely with line breaks, bullet points, and clear sections.
     try {
       debugPrint('Playing intro message: $introText');
       debugPrint('Current state - paused: $_isPaused, playing: $_isPlaying, recording: $_isRecording');
-      
-      // Ensure we're not paused before starting
-      _isPaused = false;
-      
+
+      // Check if paused - don't override user's pause
+      if (_isPaused) {
+        debugPrint('Intro message skipped - session is paused');
+        return;
+      }
+
+      // Reset force stop flag for new playback
+      _audioForceStopped = false;
+
       // Generate TTS audio
       final audioPath = await _textToSpeech(introText, voice);
+
+      // Check if paused or force stopped during TTS generation
+      if (_isPaused || _audioForceStopped) {
+        debugPrint('Intro message aborted - paused or force stopped during TTS generation');
+        return;
+      }
+
       if (audioPath == null || audioPath.isEmpty) {
         debugPrint('Failed to generate intro audio');
-        // Still start listening if auto-start is enabled
-        if (autoStartListening) {
-          await startListening(
-            continuousMode: true,
-            agentId: agentId,
-            personalityPrompt: personalityPrompt,
-            aiServiceId: aiServiceId,
-            voice: voice,
-            username: username,
-            bio: bio,
-            userId: userId,
-            userEmail: userEmail,
-            subscriptionStatus: subscriptionStatus,
-            getConversationHistory: getConversationHistory,
-          );
-        }
-        return;
-      }
-      
-      // Verify file exists
-      final audioFile = File(audioPath);
-      if (!await audioFile.exists()) {
-        debugPrint('ERROR: Audio file does not exist: $audioPath');
-        onError?.call('Audio file not found');
-        return;
-      }
-      debugPrint('Audio file exists: $audioPath, size: ${await audioFile.length()} bytes');
-      
-      // Store context for continuous mode if auto-starting
-      if (autoStartListening) {
-        _isContinuousMode = true;
-        _currentAgentId = agentId;
-        _currentPersonalityPrompt = personalityPrompt;
-        _currentAiServiceId = aiServiceId;
-        _currentVoice = voice;
-        _currentUsername = username;
-        _currentBio = bio;
-        _currentUserId = userId;
-        _currentUserEmail = userEmail;
-        _currentSubscriptionStatus = subscriptionStatus;
-        _getConversationHistory = getConversationHistory;
-      }
-      
-      debugPrint('About to play intro audio, paused: $_isPaused, continuous: $_isContinuousMode');
-      
-      // Force reset paused state for intro message (fresh start)
-      _isPaused = false;
-      
-      // Ensure player is in clean state before playing
-      try {
-        await _player.stop();
-      } catch (e) {
-        // Ignore - player might not be playing
-      }
-      _isPlaying = false;
-      
-      // Play the audio directly (bypass pause check for intro)
-      debugPrint('Starting intro audio playback: $audioPath');
-      onStateChange?.call(VoiceState.speaking);
-      _isPlaying = true;
-      
-      try {
-        // Verify file exists before playing
-        final audioFile = File(audioPath);
-        if (!await audioFile.exists()) {
-          debugPrint('ERROR: Audio file does not exist: $audioPath');
-          onError?.call('Audio file not found');
-          return;
-        }
-        
-        debugPrint('Playing intro audio file (${await audioFile.length()} bytes)');
-        
-        // Use a Completer for more reliable completion detection
-        final completer = Completer<void>();
-        StreamSubscription<void>? subscription;
-        
-        subscription = _player.onPlayerComplete.listen((_) {
-          if (!completer.isCompleted) {
-            completer.complete();
-            subscription?.cancel();
-          }
-        });
-        
-        await _player.play(DeviceFileSource(audioPath));
-        debugPrint('Intro audio playback started, waiting for completion...');
-        
-        // Wait for completion with timeout
-        await completer.future.timeout(
-          const Duration(seconds: 30),
-          onTimeout: () {
-            debugPrint('Intro audio playback timed out');
-            subscription?.cancel();
-          },
-        );
-        debugPrint('Intro audio playback completed');
-      } catch (e, stackTrace) {
-        debugPrint('Failed to play intro audio: $e');
-        debugPrint('Stack trace: $stackTrace');
-        onError?.call('Failed to play intro: $e');
-      } finally {
-        _isPlaying = false;
-
-        // Don't auto-start listening if session was ended
-        if (!_isContinuousMode) {
-          debugPrint('Intro audio: Session ended, not starting listening');
-          return;
-        }
-
-        // Wait a moment after audio finishes before starting listening
-        await Future.delayed(const Duration(milliseconds: 500));
-
-        // Double-check session wasn't ended during delay
-        if (!_isContinuousMode) {
-          debugPrint('Intro audio: Session ended during delay, not starting listening');
-          return;
-        }
-
-        // Auto-start listening if enabled
+        // Still start listening if auto-start is enabled and not paused
         if (autoStartListening && !_isPaused) {
           await startListening(
             continuousMode: true,
@@ -2466,29 +2401,143 @@ Format note content nicely with line breaks, bullet points, and clear sections.
             subscriptionStatus: subscriptionStatus,
             getConversationHistory: getConversationHistory,
           );
-        } else if (!_isPaused) {
+        }
+        return;
+      }
+
+      // Verify file exists
+      final audioFile = File(audioPath);
+      if (!await audioFile.exists()) {
+        debugPrint('ERROR: Audio file does not exist: $audioPath');
+        onError?.call('Audio file not found');
+        return;
+      }
+      debugPrint('Audio file exists: $audioPath, size: ${await audioFile.length()} bytes');
+
+      // Store context for continuous mode if auto-starting
+      if (autoStartListening) {
+        _isContinuousMode = true;
+        _currentAgentId = agentId;
+        _currentPersonalityPrompt = personalityPrompt;
+        _currentAiServiceId = aiServiceId;
+        _currentVoice = voice;
+        _currentUsername = username;
+        _currentBio = bio;
+        _currentUserId = userId;
+        _currentUserEmail = userEmail;
+        _currentSubscriptionStatus = subscriptionStatus;
+        _getConversationHistory = getConversationHistory;
+      }
+
+      // Final check before playing
+      if (_isPaused || _audioForceStopped) {
+        debugPrint('Intro message aborted - paused or force stopped before playback');
+        return;
+      }
+
+      // Ensure player is in clean state before playing
+      try {
+        await _player.stop();
+      } catch (e) {
+        // Ignore - player might not be playing
+      }
+      _isPlaying = false;
+
+      debugPrint('Starting intro audio playback: $audioPath');
+      onStateChange?.call(VoiceState.speaking);
+      _isPlaying = true;
+
+      try {
+        // Use a Completer for reliable completion detection
+        final completer = Completer<void>();
+        _audioPlaybackCompleter = completer;
+        StreamSubscription<void>? subscription;
+
+        subscription = _player.onPlayerComplete.listen((_) {
+          if (!completer.isCompleted && !_audioForceStopped) {
+            completer.complete();
+            subscription?.cancel();
+          }
+        });
+
+        await _player.play(DeviceFileSource(audioPath));
+        debugPrint('Intro audio playback started, waiting for completion...');
+
+        // Wait for completion with timeout
+        await completer.future.timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            debugPrint('Intro audio playback timed out');
+            subscription?.cancel();
+          },
+        );
+
+        _audioPlaybackCompleter = null;
+
+        // Check if force stopped during playback
+        if (_audioForceStopped) {
+          debugPrint('Intro audio was force stopped');
+          return;
+        }
+
+        debugPrint('Intro audio playback completed');
+      } catch (e, stackTrace) {
+        debugPrint('Failed to play intro audio: $e');
+        debugPrint('Stack trace: $stackTrace');
+        _audioPlaybackCompleter = null;
+        onError?.call('Failed to play intro: $e');
+      } finally {
+        _isPlaying = false;
+        _audioPlaybackCompleter = null;
+
+        // Don't continue if paused, force stopped, or session ended
+        if (_isPaused || _audioForceStopped || !_isContinuousMode) {
+          debugPrint('Intro audio: Not starting listening (paused: $_isPaused, forceStopped: $_audioForceStopped, continuous: $_isContinuousMode)');
+          return;
+        }
+
+        // Wait a moment after audio finishes before starting listening
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // Final check before starting listening
+        if (_isPaused || _audioForceStopped || !_isContinuousMode) {
+          debugPrint('Intro audio: Session state changed during delay, not starting listening');
+          return;
+        }
+
+        // Auto-start listening if enabled
+        if (autoStartListening) {
+          await startListening(
+            continuousMode: true,
+            agentId: agentId,
+            personalityPrompt: personalityPrompt,
+            aiServiceId: aiServiceId,
+            voice: voice,
+            username: username,
+            bio: bio,
+            userId: userId,
+            userEmail: userEmail,
+            subscriptionStatus: subscriptionStatus,
+            getConversationHistory: getConversationHistory,
+          );
+        } else {
           onStateChange?.call(VoiceState.listening);
         }
       }
-      debugPrint('Intro audio playback completed');
     } catch (e, stackTrace) {
       debugPrint('Error playing intro message: $e');
       debugPrint('Stack trace: $stackTrace');
       onError?.call('Failed to play intro: $e');
 
-      // Don't auto-start listening if session was ended
-      if (!_isContinuousMode) {
-        debugPrint('Intro audio error: Session ended, not starting listening');
+      // Don't continue if paused or session ended
+      if (_isPaused || !_isContinuousMode) {
         return;
       }
 
-      // Return to listening state even if intro fails
-      onStateChange?.call(VoiceState.listening);
-
       // Still try to start listening if auto-start is enabled
-      if (autoStartListening && _isContinuousMode) {
+      if (autoStartListening) {
         await Future.delayed(const Duration(milliseconds: 300));
-        if (!_isContinuousMode) return; // Check again after delay
+        if (_isPaused || !_isContinuousMode) return;
         await startListening(
           continuousMode: true,
           agentId: agentId,

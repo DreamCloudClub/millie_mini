@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:collection';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../services/reports_service.dart';
 import '../services/report_settings_service.dart';
+import '../utils/constants.dart';
 
 /// Provider for managing AI reports state
 class ReportsProvider extends ChangeNotifier {
@@ -17,8 +19,8 @@ class ReportsProvider extends ChangeNotifier {
   // Schedules
   List<CategorySchedule> _schedules = [];
 
-  // Category filtering
-  String? _selectedCategory;
+  // Category filtering (UI filter - multi-select)
+  Set<String> _selectedCategoryFilters = {};  // Empty = show all
   List<String> _reportCategories = [];
 
   // Sort order: true = newest first, false = oldest first
@@ -28,6 +30,9 @@ class ReportsProvider extends ChangeNotifier {
   Report? _pendingAnnouncement;
   Report? _lastAnnouncedReport;
   List<Report> _pendingReportQueue = [];
+
+  // Display settings
+  DisplaySize _displaySize = DisplaySize.normal;
 
   bool _isLoading = false;
   Timer? _pollingTimer;
@@ -41,6 +46,28 @@ class ReportsProvider extends ChangeNotifier {
 
   List<Report> get liveReports => _liveReports;
   List<Report> get savedReports => _savedReports;
+
+  /// Filtered saved reports based on UI category filter
+  List<Report> get filteredSavedReports {
+    var reports = _savedReports.toList();
+
+    // Apply UI category filter (multi-select tabs)
+    if (_selectedCategoryFilters.isNotEmpty) {
+      final filterLower = _selectedCategoryFilters.map((c) => c.toLowerCase()).toSet();
+      reports = reports
+          .where((r) => filterLower.contains(r.category.toLowerCase()))
+          .toList();
+    }
+
+    // Apply sort order by publishedAt (falls back to createdAt)
+    reports.sort((a, b) {
+      final aTime = a.publishedAt ?? a.createdAt;
+      final bTime = b.publishedAt ?? b.createdAt;
+      return _newestFirst ? bTime.compareTo(aTime) : aTime.compareTo(bTime);
+    });
+
+    return reports;
+  }
   List<WatchlistItem> get watchlist => _watchlist;
   List<WatchlistItem> get enabledWatchlist =>
       _watchlist.where((w) => w.enabled).toList();
@@ -48,7 +75,8 @@ class ReportsProvider extends ChangeNotifier {
   List<CategorySchedule> get schedules => _schedules;
   List<CategorySchedule> get enabledSchedules =>
       _schedules.where((s) => s.enabled).toList();
-  String? get selectedCategory => _selectedCategory;
+  Set<String> get selectedCategoryFilters => _selectedCategoryFilters;
+  bool get isAllCategoriesSelected => _selectedCategoryFilters.isEmpty;
   List<String> get reportCategories => _reportCategories;
   bool get newestFirst => _newestFirst;
 
@@ -57,6 +85,7 @@ class ReportsProvider extends ChangeNotifier {
   List<Report> get pendingReportQueue => _pendingReportQueue;
   bool get isLoading => _isLoading;
   bool get hasUnreadReports => _pendingAnnouncement != null || _pendingReportQueue.isNotEmpty;
+  DisplaySize get displaySize => _displaySize;
 
   /// Whether announcements are enabled (true if any schedules are enabled)
   bool get announcementsEnabled => enabledSchedules.isNotEmpty;
@@ -64,7 +93,7 @@ class ReportsProvider extends ChangeNotifier {
   /// Number of active schedules
   int get activeScheduleCount => enabledSchedules.length;
 
-  /// Filtered live reports based on selected category
+  /// Filtered live reports based on watchlist and UI category filter
   /// Live = not announced AND not saved
   List<Report> get filteredLiveReports {
     final seenIds = <String>{};
@@ -74,16 +103,30 @@ class ReportsProvider extends ChangeNotifier {
       return !_announcedReportIds.contains(r.id) && !_savedReportIds.contains(r.id);
     }).toList();
 
-    if (_selectedCategory != null && _selectedCategory!.isNotEmpty) {
+    // Filter by enabled watchlist categories (from Settings)
+    final enabledCategories = enabledWatchlist
+        .map((w) => w.category.toLowerCase())
+        .toSet();
+    if (enabledCategories.isNotEmpty) {
       reports = reports
-          .where((r) => r.category.toLowerCase() == _selectedCategory!.toLowerCase())
+          .where((r) => enabledCategories.contains(r.category.toLowerCase()))
           .toList();
     }
 
-    // Apply sort order
-    reports.sort((a, b) => _newestFirst
-        ? b.createdAt.compareTo(a.createdAt)
-        : a.createdAt.compareTo(b.createdAt));
+    // Apply UI category filter (multi-select tabs)
+    if (_selectedCategoryFilters.isNotEmpty) {
+      final filterLower = _selectedCategoryFilters.map((c) => c.toLowerCase()).toSet();
+      reports = reports
+          .where((r) => filterLower.contains(r.category.toLowerCase()))
+          .toList();
+    }
+
+    // Apply sort order by publishedAt (falls back to createdAt)
+    reports.sort((a, b) {
+      final aTime = a.publishedAt ?? a.createdAt;
+      final bTime = b.publishedAt ?? b.createdAt;
+      return _newestFirst ? bTime.compareTo(aTime) : aTime.compareTo(bTime);
+    });
 
     return reports;
   }
@@ -97,10 +140,30 @@ class ReportsProvider extends ChangeNotifier {
       return _announcedReportIds.contains(r.id) && !_savedReportIds.contains(r.id);
     }).toList();
 
-    // Apply sort order
-    reports.sort((a, b) => _newestFirst
-        ? b.createdAt.compareTo(a.createdAt)
-        : a.createdAt.compareTo(b.createdAt));
+    // Filter by enabled watchlist categories (from Settings)
+    final enabledCategories = enabledWatchlist
+        .map((w) => w.category.toLowerCase())
+        .toSet();
+    if (enabledCategories.isNotEmpty) {
+      reports = reports
+          .where((r) => enabledCategories.contains(r.category.toLowerCase()))
+          .toList();
+    }
+
+    // Apply UI category filter (multi-select tabs)
+    if (_selectedCategoryFilters.isNotEmpty) {
+      final filterLower = _selectedCategoryFilters.map((c) => c.toLowerCase()).toSet();
+      reports = reports
+          .where((r) => filterLower.contains(r.category.toLowerCase()))
+          .toList();
+    }
+
+    // Apply sort order by publishedAt (falls back to createdAt)
+    reports.sort((a, b) {
+      final aTime = a.publishedAt ?? a.createdAt;
+      final bTime = b.publishedAt ?? b.createdAt;
+      return _newestFirst ? bTime.compareTo(aTime) : aTime.compareTo(bTime);
+    });
 
     return reports;
   }
@@ -142,6 +205,7 @@ class ReportsProvider extends ChangeNotifier {
       loadWatchlist(),
       loadAvailableCategories(),
       _loadUserState(),
+      _loadDisplaySize(),
     ]);
 
     _startPolling();
@@ -284,12 +348,34 @@ class ReportsProvider extends ChangeNotifier {
   }
 
   // ============================================================
-  // CATEGORY FILTERING
+  // CATEGORY FILTERING (UI multi-select)
   // ============================================================
 
-  /// Set the selected category filter
-  void setSelectedCategory(String? category) {
-    _selectedCategory = category;
+  /// Toggle a category in the UI filter
+  void toggleCategoryFilter(String category) {
+    final lower = category.toLowerCase();
+    if (_selectedCategoryFilters.contains(lower)) {
+      _selectedCategoryFilters.remove(lower);
+    } else {
+      _selectedCategoryFilters.add(lower);
+    }
+    notifyListeners();
+  }
+
+  /// Check if a category is selected in the UI filter
+  bool isCategoryFilterSelected(String category) {
+    return _selectedCategoryFilters.contains(category.toLowerCase());
+  }
+
+  /// Select all categories (clear filter)
+  void selectAllCategories() {
+    _selectedCategoryFilters.clear();
+    notifyListeners();
+  }
+
+  /// Set specific categories (for programmatic use)
+  void setCategoryFilters(Set<String> categories) {
+    _selectedCategoryFilters = categories.map((c) => c.toLowerCase()).toSet();
     notifyListeners();
   }
 
@@ -615,6 +701,36 @@ class ReportsProvider extends ChangeNotifier {
       grouped.putIfAbsent(cat.category, () => []).add(cat);
     }
     return grouped;
+  }
+
+  // ============================================================
+  // DISPLAY SIZE
+  // ============================================================
+
+  /// Load user's display size preference from local storage
+  Future<void> _loadDisplaySize() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(StorageKeys.reportsDisplaySize);
+      _displaySize = DisplaySizeExtension.fromString(saved);
+      debugPrint('ReportsProvider: Loaded display size: ${_displaySize.name}');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('ReportsProvider: Error loading display size: $e');
+    }
+  }
+
+  /// Update display size preference in local storage
+  Future<void> updateDisplaySize(DisplaySize displaySize) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(StorageKeys.reportsDisplaySize, displaySize.name);
+      _displaySize = displaySize;
+      debugPrint('ReportsProvider: Saved display size: ${displaySize.name}');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('ReportsProvider: Error saving display size: $e');
+    }
   }
 
   // ============================================================

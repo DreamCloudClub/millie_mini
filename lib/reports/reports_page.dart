@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../providers/voice_provider.dart';
 import '../providers/reports_provider.dart';
@@ -53,17 +54,19 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
     // Load report categories on init
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ReportsProvider>().loadReportCategories();
-      // Wire up the open report callback
+      // Wire up callbacks
       final voiceProvider = context.read<VoiceProvider>();
       voiceProvider.onOpenAndPlayReport = _openReportAndPlay;
+      voiceProvider.onOpenLink = _openLink;
     });
   }
 
   @override
   void dispose() {
-    // Clear the callback
+    // Clear callbacks
     final voiceProvider = context.read<VoiceProvider>();
     voiceProvider.onOpenAndPlayReport = null;
+    voiceProvider.onOpenLink = null;
     _searchController.removeListener(_onSearchChanged);
     _searchFocusNode.removeListener(_onFocusChanged);
     _searchController.dispose();
@@ -74,6 +77,9 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
   /// Called by AI when user wants to hear full report
   void _openReportAndPlay(String reportId) async {
     debugPrint('ReportsPage: Opening report $reportId for playback');
+
+    // Note: We don't pause here - the ReportViewPage will handle stopping
+    // any current audio before playing the report
 
     // Find the report
     final reportsProvider = context.read<ReportsProvider>();
@@ -98,7 +104,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => ReportViewPage(
           report: report,
-          autoPlay: true, // New parameter to auto-play on load
+          autoPlay: true, // Auto-play on load
           onReportUpdated: (updatedReport) {
             refreshReports();
           },
@@ -114,6 +120,15 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
         reverseTransitionDuration: Duration.zero,
       ),
     );
+  }
+
+  /// Called by AI to open an external link
+  void _openLink(String url) async {
+    debugPrint('ReportsPage: Opening link $url');
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   void _onSearchChanged() {
@@ -173,7 +188,12 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
   void setCategory(String? category) {
     debugPrint('ReportsPage: Setting category to $category');
     final reportsProvider = context.read<ReportsProvider>();
-    reportsProvider.setSelectedCategory(category);
+    if (category == null) {
+      reportsProvider.selectAllCategories();
+    } else {
+      // Set just this one category
+      reportsProvider.setCategoryFilters({category});
+    }
   }
 
   /// Get current reports based on filter and category
@@ -188,7 +208,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
         reports = reportsProvider.historyReports;
         break;
       case ReportFilter.saved:
-        reports = reportsProvider.savedReports;
+        reports = reportsProvider.filteredSavedReports;
         break;
     }
     return _filterBySearch(reports);
@@ -350,10 +370,37 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
     await voiceProvider.readReport(report);
   }
 
+  void _skipToNextReport(Report currentReport) {
+    // Get current reports and find next one
+    final reports = getCurrentReports();
+    final currentIndex = reports.indexWhere((r) => r.id == currentReport.id);
+
+    if (currentIndex >= 0 && currentIndex < reports.length - 1) {
+      final nextReport = reports[currentIndex + 1];
+      _openReport(nextReport);
+    } else {
+      // No more reports, show message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No more reports'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   /// Handle Wake button - triggers report check-in asking if now is a good time
   void _onWakeForReports() async {
     final voiceProvider = context.read<VoiceProvider>();
     await voiceProvider.triggerReportCheckIn();
+  }
+
+  /// Refresh both AI session and reports feed
+  Future<void> _refreshAll() async {
+    // Refresh AI session
+    widget.onRefresh();
+    // Reload reports from database
+    await context.read<ReportsProvider>().loadReports();
   }
 
   @override
@@ -466,7 +513,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
                             reports = reportsProvider.historyReports;
                             break;
                           case ReportFilter.saved:
-                            reports = reportsProvider.savedReports;
+                            reports = reportsProvider.filteredSavedReports;
                             break;
                         }
 
@@ -498,6 +545,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
                               onDelete: () => _deleteReport(report),
                               onSave: () => _toggleSaveReport(report),
                               onRead: () => _readReport(report),
+                              onSkip: () => _skipToNextReport(report),
                             );
                           },
                         );
@@ -528,7 +576,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
               ControlBar(
                 onPause: widget.onPause,
                 onPlay: _onWakeForReports,
-                onRefresh: widget.onRefresh,
+                onRefresh: _refreshAll,
                 onExit: widget.onExit,
               ),
           ],
@@ -540,8 +588,12 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
   Widget _buildCategoryTabsWithSortLabel() {
     return Consumer<ReportsProvider>(
       builder: (context, provider, _) {
-        final categories = provider.reportCategories;
-        final selectedCategory = provider.selectedCategory;
+        // Use enabled watchlist categories (what user selected in settings)
+        final categories = provider.enabledWatchlist
+            .map((w) => w.category)
+            .toSet()
+            .toList();
+        final isAllSelected = provider.isAllCategoriesSelected;
         final newestFirst = provider.newestFirst;
 
         return Row(
@@ -559,16 +611,17 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
                           // "All" tab
                           _buildCategoryTab(
                             label: 'All',
-                            isSelected: selectedCategory == null,
-                            onTap: () => provider.setSelectedCategory(null),
+                            isSelected: isAllSelected,
+                            onTap: () => provider.selectAllCategories(),
                           ),
-                          // Category tabs
+                          // Category tabs (multi-select)
                           ...categories.map((category) {
                             final displayName = category[0].toUpperCase() + category.substring(1);
+                            final isSelected = provider.isCategoryFilterSelected(category);
                             return _buildCategoryTab(
                               label: displayName,
-                              isSelected: selectedCategory?.toLowerCase() == category.toLowerCase(),
-                              onTap: () => provider.setSelectedCategory(category),
+                              isSelected: isSelected,
+                              onTap: () => provider.toggleCategoryFilter(category),
                               color: _getCategoryColor(category),
                             );
                           }),

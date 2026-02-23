@@ -7,6 +7,7 @@ import '../models/models.dart';
 class ReportSettingsService {
   static final _supabase = Supabase.instance.client;
   static const String _schedulesTable = 'reports_schedules';
+  static const String _settingsTable = 'report_settings';
 
   // ============================================================
   // CATEGORY SCHEDULES CRUD
@@ -139,6 +140,64 @@ class ReportSettingsService {
     } catch (e) {
       debugPrint('ReportSettingsService: Error getting active categories: $e');
       return {};
+    }
+  }
+
+  // ============================================================
+  // DISPLAY SIZE SETTINGS
+  // ============================================================
+
+  /// Get the user's display size preference
+  static Future<DisplaySize> getDisplaySize() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint('ReportSettingsService: No user logged in');
+        return DisplaySize.normal;
+      }
+
+      final response = await _supabase
+          .from(_settingsTable)
+          .select('display_size')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      if (response == null) {
+        return DisplaySize.normal;
+      }
+
+      return DisplaySizeExtension.fromString(response['display_size'] as String?);
+    } catch (e) {
+      debugPrint('ReportSettingsService: Error getting display size: $e');
+      return DisplaySize.normal;
+    }
+  }
+
+  /// Update the user's display size preference
+  static Future<bool> updateDisplaySize(DisplaySize displaySize) async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint('ReportSettingsService: No user logged in');
+        return false;
+      }
+
+      // Upsert to handle case where settings row doesn't exist yet
+      // Include enabled field with default value for new row inserts
+      await _supabase
+          .from(_settingsTable)
+          .upsert({
+            'user_id': userId,
+            'enabled': true,
+            'display_size': displaySize.name,
+            'updated_at': DateTime.now().toIso8601String(),
+          }, onConflict: 'user_id');
+
+      debugPrint('ReportSettingsService: Updated display size to ${displaySize.name}');
+      return true;
+    } catch (e) {
+      debugPrint('ReportSettingsService: Error updating display size: $e');
+      return false;
     }
   }
 }

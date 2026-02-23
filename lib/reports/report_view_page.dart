@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../providers/voice_provider.dart';
 import '../providers/reports_provider.dart';
@@ -138,6 +139,16 @@ class _ReportViewPageState extends State<ReportViewPage> {
     await voiceProvider.readReport(_currentReport);
   }
 
+  Future<void> _openSourceUrl() async {
+    final url = _currentReport.sourceUrl;
+    if (url == null || url.isEmpty) return;
+
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   Future<void> _deleteReport() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -256,6 +267,8 @@ class _ReportViewPageState extends State<ReportViewPage> {
   @override
   Widget build(BuildContext context) {
     final categoryColor = _getCategoryColor();
+    final displaySize = context.watch<ReportsProvider>().displaySize;
+    final isLarge = displaySize == DisplaySize.large;
 
     return Scaffold(
       backgroundColor: AppColors.faceBackground,
@@ -378,6 +391,23 @@ class _ReportViewPageState extends State<ReportViewPage> {
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // Featured image (if available)
+                            if (_currentReport.imageUrl != null &&
+                                _currentReport.imageUrl!.isNotEmpty) ...[
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(
+                                  _currentReport.imageUrl!,
+                                  height: 200,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const SizedBox.shrink(),
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.lg),
+                            ],
+
                             // Category chip
                             Center(
                               child: Container(
@@ -410,9 +440,9 @@ class _ReportViewPageState extends State<ReportViewPage> {
                                 _currentReport.title.isEmpty
                                     ? 'Untitled Report'
                                     : _currentReport.title,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontFamily: AppTextStyles.fontFamily,
-                                  fontSize: 22,
+                                  fontSize: isLarge ? 28 : 24,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
                                 ),
@@ -497,7 +527,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
                                 _currentReport.summary,
                                 style: TextStyle(
                                   fontFamily: AppTextStyles.fontFamily,
-                                  fontSize: 16,
+                                  fontSize: isLarge ? 22 : 18,
                                   fontWeight: FontWeight.w500,
                                   color: Colors.white.withOpacity(0.9),
                                   fontStyle: FontStyle.italic,
@@ -519,13 +549,47 @@ class _ReportViewPageState extends State<ReportViewPage> {
                                   : _currentReport.content,
                               style: TextStyle(
                                 fontFamily: AppTextStyles.fontFamily,
-                                fontSize: 16,
+                                fontSize: isLarge ? 22 : 18,
                                 color: _currentReport.content.isEmpty
                                     ? Colors.white.withOpacity(0.3)
                                     : Colors.white.withOpacity(0.9),
                                 height: 1.6,
                               ),
                             ),
+
+                            // Source article link
+                            if (_currentReport.sourceUrl != null &&
+                                _currentReport.sourceUrl!.isNotEmpty) ...[
+                              const SizedBox(height: AppSpacing.lg),
+                              Container(
+                                height: 1,
+                                color: Colors.white.withOpacity(0.1),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              GestureDetector(
+                                onTap: () => _openSourceUrl(),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.open_in_new,
+                                      size: 16,
+                                      color: categoryColor,
+                                    ),
+                                    const SizedBox(width: AppSpacing.sm),
+                                    Text(
+                                      'Read Original Article',
+                                      style: TextStyle(
+                                        fontFamily: AppTextStyles.fontFamily,
+                                        fontSize: 14,
+                                        color: categoryColor,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ],
                         );
                       },

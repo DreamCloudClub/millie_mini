@@ -33,6 +33,7 @@ class VoiceProvider extends ChangeNotifier {
   ReportsProvider? _reportsProvider;
   bool _isInReportMode = false; // When true, bypass OpenClaw for report conversations
   bool _isAwaitingReportCheckIn = false; // True only during "Is now a good time?" question
+  bool _isReadingReport = false; // True while playing a report audio
   final NoteToolsHandler _noteToolsHandler = NoteToolsHandler();
 
   VoiceState _state = VoiceState.sleep;
@@ -184,11 +185,11 @@ class VoiceProvider extends ChangeNotifier {
 
       reportsContext.writeln('');
       reportsContext.writeln('INSTRUCTIONS:');
-      reportsContext.writeln('1. If user says yes to check-in, read the CURRENT REPORT title and summary.');
-      reportsContext.writeln('2. Then ask "Would you like to hear the full report?"');
-      reportsContext.writeln('3. If yes, respond with EXACTLY: [OPEN_REPORT:${report.id}] and nothing else.');
-      reportsContext.writeln('4. If no/skip/next/pass, offer the next report from the queue (read title + summary).');
-      reportsContext.writeln('5. If no more reports, say "That\'s all the reports for now."]');
+      reportsContext.writeln('1. If user says yes to check-in, briefly mention the title then respond with ONLY: [OPEN_REPORT:${report.id}]');
+      reportsContext.writeln('2. If user says yes/more/read it/play it - respond with ONLY: [OPEN_REPORT:${report.id}]');
+      reportsContext.writeln('3. If user says skip/next/pass, briefly mention the next report title then respond with ONLY: [OPEN_REPORT:next_report_id]');
+      reportsContext.writeln('4. If no more reports, say "That\'s all the reports for now."');
+      reportsContext.writeln('IMPORTANT: When opening a report, your response should be ONLY the [OPEN_REPORT:id] marker with no other text.]');
 
       addUserMessage(reportsContext.toString());
       addAssistantMessage(checkInMessage);
@@ -233,6 +234,9 @@ class VoiceProvider extends ChangeNotifier {
   Future<void> readReport(Report report) async {
     debugPrint('VoiceProvider: Reading report: ${report.title}');
 
+    _isReadingReport = true;
+    notifyListeners();
+
     try {
       // Stop any current audio
       await _pipeline.forceStopAudio();
@@ -254,6 +258,9 @@ class VoiceProvider extends ChangeNotifier {
 
     } catch (e) {
       debugPrint('VoiceProvider: Error reading report: $e');
+    } finally {
+      _isReadingReport = false;
+      notifyListeners();
     }
   }
 
@@ -344,6 +351,9 @@ class VoiceProvider extends ChangeNotifier {
 
     debugPrint('VoiceProvider: Triggering report selection (skipIntro: $skipIntro)');
 
+    // Stop any current audio before starting new interaction
+    await _pipeline.forceStopAudio();
+
     // Enable report mode - force reports tools to be loaded
     _isInReportMode = true;
     _noteToolsHandler.forcedIntents = {IntentCategory.reports}; // Force reports tools
@@ -384,11 +394,12 @@ class VoiceProvider extends ChangeNotifier {
         }
         reportsContext.writeln('');
         reportsContext.writeln('INSTRUCTIONS:');
-        reportsContext.writeln('1. When user says "start at the top", "first one", "open the first", or similar - immediately read Report 1 title and summary, then ask "Would you like to hear the full report?"');
-        reportsContext.writeln('2. If user names a specific topic, find the matching report and read its title/summary.');
-        reportsContext.writeln('3. If user says YES to full report, respond with ONLY: [OPEN_REPORT:the_report_id] - nothing else.');
-        reportsContext.writeln('4. If user says no/skip/next/pass, move to the next report and read its title/summary.');
+        reportsContext.writeln('1. When user says "start at the top", "first one", or similar - briefly mention the title, then respond with ONLY: [OPEN_REPORT:the_report_id]');
+        reportsContext.writeln('2. If user names a specific topic, find the matching report and respond with ONLY: [OPEN_REPORT:the_report_id]');
+        reportsContext.writeln('3. If user says yes/more/read it/play it/open it - respond with ONLY: [OPEN_REPORT:the_report_id]');
+        reportsContext.writeln('4. If user says skip/next/pass, briefly mention the next report title then respond with ONLY: [OPEN_REPORT:the_report_id]');
         reportsContext.writeln('5. If no more reports, say "That\'s all the reports for now."');
+        reportsContext.writeln('IMPORTANT: When opening a report, your response should be ONLY the [OPEN_REPORT:id] marker with no other text.');
         reportsContext.writeln(']');
         addUserMessage(reportsContext.toString());
       } else {
@@ -561,6 +572,7 @@ class VoiceProvider extends ChangeNotifier {
   bool get isMicActive => _state.isMicActive;
   bool get isPaused => _state == VoiceState.paused;
   bool get isRecording => _pipeline.isRecording;
+  bool get isReadingReport => _isReadingReport;
 
   // ============================================================
   // GAME CONTROLLER (FSM-based lesson mode)
@@ -589,6 +601,9 @@ class VoiceProvider extends ChangeNotifier {
 
   /// Callback for changing report category (All, Technology, etc.)
   void Function(String? category)? onSetReportCategory;
+
+  /// Callback for opening external links (triggered by AI)
+  void Function(String url)? onOpenLink;
 
   /// Setup the game controller with pipeline integration
   void _setupGameController() {
@@ -850,34 +865,56 @@ class VoiceProvider extends ChangeNotifier {
       notifyListeners();
     };
 
-    _pipeline.onResponse = (response) {
+    _pipeline.onResponse = (response) async {
       _lastResponse = response;
 
       // Check for navigate to reports command from AI
       if (response.contains('[OPEN_REPORTS]') && onNavigateToReports != null) {
         debugPrint('VoiceProvider: AI requested to open reports page');
-        // Navigate to reports page and trigger check-in
+        // Stop current audio/listening before navigating
+        await _pipeline.forceStopAudio();
+        await _pipeline.pauseContinuousMode();
+        // Navigate to reports page
         onNavigateToReports!();
-        // Trigger the report check-in after a short delay for navigation
-        // skipIntro: true because we're already in a voice conversation
-        Future.delayed(const Duration(milliseconds: 300), () {
-          triggerReportCheckIn(skipIntro: true);
-        });
+        // Wait for navigation to complete, then trigger check-in
+        await Future.delayed(const Duration(milliseconds: 500));
+        // Only trigger check-in if not paused by user
+        if (_state != VoiceState.paused) {
+          await triggerReportCheckIn(skipIntro: true);
+        }
         return;
       }
 
       // Check for report open command from AI
+      // Works whenever reports page is active (callback is set)
       final openReportMatch = RegExp(r'\[OPEN_REPORT:([^\]]+)\]').firstMatch(response);
-      if (openReportMatch != null && _isInReportMode) {
+      if (openReportMatch != null && onOpenAndPlayReport != null) {
         final reportId = openReportMatch.group(1);
-        if (reportId != null && onOpenAndPlayReport != null) {
+        if (reportId != null) {
           debugPrint('VoiceProvider: AI requested to open report: $reportId');
-          // Don't add this marker to conversation - just trigger the action
+          // Stop any current audio/listening before opening report
+          await _pipeline.forceStopAudio();
+          await _pipeline.pauseContinuousMode();
+          // Exit report mode if we were in it
+          if (_isInReportMode) {
+            exitReportMode();
+          }
+          // Navigate to full report page and auto-play
           onOpenAndPlayReport!(reportId);
-          // Exit report mode since we're navigating
-          exitReportMode();
           return;
         }
+      }
+
+      // Check for open link command from AI
+      final linkMatch = RegExp(r'\[OPEN_LINK:([^\]]+)\]').firstMatch(response);
+      if (linkMatch != null && onOpenLink != null) {
+        final url = linkMatch.group(1)!;
+        debugPrint('VoiceProvider: AI requested to open link: $url');
+        // Stop audio and pause before opening link
+        await _pipeline.forceStopAudio();
+        await _pipeline.pauseContinuousMode();
+        onOpenLink!(url);
+        return;
       }
 
       // Check for report filter change command from AI

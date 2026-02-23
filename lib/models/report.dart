@@ -10,6 +10,9 @@ class Report {
   final List<String> topics;   // Keywords for filtering
   final List<String> sourceArticleIds; // References to raw_articles used
   final String? audioUrl;      // Cached TTS audio URL (generated on first play)
+  final String? sourceUrl;     // Link to original article
+  final String? imageUrl;      // Featured image from source article
+  final DateTime? publishedAt; // Original article publish time (for sorting)
   final DateTime createdAt;
   final DateTime expiresAt;    // createdAt + 48hrs
 
@@ -23,6 +26,9 @@ class Report {
     this.topics = const [],
     this.sourceArticleIds = const [],
     this.audioUrl,
+    this.sourceUrl,
+    this.imageUrl,
+    this.publishedAt,
     required this.createdAt,
     required this.expiresAt,
   });
@@ -55,6 +61,11 @@ class Report {
       topics: topicsList,
       sourceArticleIds: sourceIds,
       audioUrl: json['audio_url'] as String?,
+      sourceUrl: json['source_url'] as String?,
+      imageUrl: json['image_url'] as String?,
+      publishedAt: json['published_at'] != null
+          ? DateTime.parse(json['published_at'] as String)
+          : null,
       createdAt: DateTime.parse(json['created_at'] as String),
       expiresAt: DateTime.parse(json['expires_at'] as String),
     );
@@ -96,6 +107,9 @@ class Report {
     List<String>? topics,
     List<String>? sourceArticleIds,
     String? audioUrl,
+    String? sourceUrl,
+    String? imageUrl,
+    DateTime? publishedAt,
   }) {
     return Report(
       id: id,
@@ -107,6 +121,9 @@ class Report {
       topics: topics ?? this.topics,
       sourceArticleIds: sourceArticleIds ?? this.sourceArticleIds,
       audioUrl: audioUrl ?? this.audioUrl,
+      sourceUrl: sourceUrl ?? this.sourceUrl,
+      imageUrl: imageUrl ?? this.imageUrl,
+      publishedAt: publishedAt ?? this.publishedAt,
       createdAt: createdAt,
       expiresAt: expiresAt,
     );
@@ -147,6 +164,10 @@ class Report {
         return 'health_and_safety';
       case 'politics':
         return 'account_balance';
+      case 'kids':
+        return 'child_care';
+      case 'lifestyle':
+        return 'spa';
       default:
         return 'article';
     }

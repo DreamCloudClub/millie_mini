@@ -191,6 +191,12 @@ class ReportSchedulerService {
       return;
     }
 
+    // Don't interrupt if a report is currently being read
+    if (_voiceProvider!.isReadingReport) {
+      debugPrint('ReportSchedulerService: Report is being read, will retry later');
+      return;
+    }
+
     // Check if voice is in a state that allows announcements
     final state = _voiceProvider!.state;
     if (state != VoiceState.paused && state != VoiceState.sleep) {
