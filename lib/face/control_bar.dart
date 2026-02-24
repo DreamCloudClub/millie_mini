@@ -147,13 +147,21 @@ class ControlBar extends StatelessWidget {
                     buttonColor: Colors.blue,
                   ),
 
-              // Exit button - primary orange
-              _ControlButton(
-                icon: Icons.close,
-                label: 'Exit',
-                onTap: onExit,
-                buttonColor: AppColors.primaryOrange,
-              ),
+              // Skip button (when available) or Exit button
+              if (onSkip != null && !isGameRunning)
+                _ControlButton(
+                  icon: Icons.skip_next,
+                  label: 'Skip',
+                  onTap: onSkip!,
+                  buttonColor: AppColors.primaryOrange,
+                )
+              else
+                _ControlButton(
+                  icon: Icons.close,
+                  label: 'Exit',
+                  onTap: onExit,
+                  buttonColor: AppColors.primaryOrange,
+                ),
             ],
           ),
         );

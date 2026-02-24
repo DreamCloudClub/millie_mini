@@ -571,7 +571,7 @@ class _ScheduleRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    schedule.categoryDisplay,
+                    schedule.timeRangeDisplay,
                     style: TextStyle(
                       fontFamily: AppTextStyles.fontFamily,
                       fontSize: 16,
@@ -581,7 +581,7 @@ class _ScheduleRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${schedule.timeRangeDisplay} • ${schedule.daysDisplay} • ${schedule.frequency.displayName}',
+                    '${schedule.daysDisplay} • ${schedule.frequency.displayName}',
                     style: AppTextStyles.bodySmall,
                   ),
                 ],

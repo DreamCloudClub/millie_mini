@@ -36,6 +36,7 @@ class VoicePipelineService {
   bool _isPaused = false;
   bool _isProcessing = false; // Guard to prevent parallel processing
   bool _isStopping = false; // Guard to prevent concurrent stop operations
+  bool _abortProcessing = false; // Flag to abort processing after transcription callback
   
   // Conversation context (stored for continuous flow)
   String? _currentAgentId;
@@ -535,7 +536,16 @@ class VoicePipelineService {
       
       // Notify transcription (adds to conversation)
       onTranscription?.call(transcription);
-      
+
+      // Check if processing was aborted by the transcription callback
+      // This allows VoiceProvider to intercept and handle certain requests directly
+      if (_abortProcessing) {
+        debugPrint('Processing aborted by transcription callback - skipping LLM');
+        _abortProcessing = false;
+        _isProcessing = false;
+        return;
+      }
+
       // Check for reminder intent handling (if callback is set)
       String? reminderResponse;
       if (onProcessReminderIntent != null) {
@@ -766,7 +776,14 @@ class VoicePipelineService {
       }
       
       onTranscription?.call(transcription);
-      
+
+      // Check if processing was aborted by the transcription callback
+      if (_abortProcessing) {
+        debugPrint('Processing aborted by transcription callback - skipping LLM');
+        _abortProcessing = false;
+        return;
+      }
+
       // Step 2: If paused, only check for resume triggers (like "hey millie")
       if (_isPaused) {
         if (_checkResumeTriggers(transcription)) {
@@ -1009,6 +1026,44 @@ class VoicePipelineService {
     } catch (e) {
       debugPrint('Error force stopping audio: $e');
       _isPlaying = false;
+    }
+  }
+
+  /// Abort the current processing pipeline (called synchronously from onTranscription callback)
+  /// This allows VoiceProvider to intercept transcriptions and handle them directly
+  void abortCurrentProcessing() {
+    debugPrint('Aborting current processing pipeline');
+    _abortProcessing = true;
+  }
+
+  /// Pause audio playback (can be resumed)
+  Future<void> pauseAudio() async {
+    debugPrint('Pausing audio playback');
+    try {
+      await _player.pause();
+    } catch (e) {
+      debugPrint('Error pausing audio: $e');
+    }
+  }
+
+  /// Resume paused audio playback
+  Future<void> resumeAudio() async {
+    debugPrint('Resuming audio playback');
+    try {
+      await _player.resume();
+    } catch (e) {
+      debugPrint('Error resuming audio: $e');
+    }
+  }
+
+  /// Seek audio to beginning and pause (reset without auto-play)
+  Future<void> restartAudio() async {
+    debugPrint('Resetting audio to beginning (paused)');
+    try {
+      await _player.seek(Duration.zero);
+      await _player.pause();
+    } catch (e) {
+      debugPrint('Error restarting audio: $e');
     }
   }
 
@@ -1352,6 +1407,71 @@ class VoicePipelineService {
     }
   }
 
+  /// Generate TTS audio only (no playback), returns local file path
+  Future<String?> generateTTSOnly(String text, String voice) async {
+    try {
+      debugPrint('Generating TTS only: ${text.substring(0, text.length > 50 ? 50 : text.length)}...');
+
+      // Show "Thinking..." while generating TTS
+      onStateChange?.call(VoiceState.processing);
+
+      final audioPath = await _textToSpeech(text, voice);
+      if (audioPath == null) {
+        debugPrint('Failed to generate TTS audio');
+        return null;
+      }
+
+      debugPrint('TTS generated: $audioPath');
+      return audioPath;
+    } catch (e) {
+      debugPrint('Error generating TTS: $e');
+      return null;
+    }
+  }
+
+  /// Play a local audio file
+  Future<void> playLocalAudio(String audioPath) async {
+    try {
+      debugPrint('Playing local audio: $audioPath');
+
+      // Reset force stop flag for new playback
+      _audioForceStopped = false;
+
+      // Show "Speaking..."
+      onStateChange?.call(VoiceState.speaking);
+
+      try { await _player.stop(); } catch (_) {}
+      _isPlaying = true;
+
+      final completer = Completer<void>();
+      _audioPlaybackCompleter = completer;
+      StreamSubscription<void>? subscription;
+      subscription = _player.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted && !_audioForceStopped) {
+          completer.complete();
+          subscription?.cancel();
+        }
+      });
+
+      await _player.play(DeviceFileSource(audioPath));
+      await completer.future.timeout(const Duration(seconds: 300), onTimeout: () {
+        subscription?.cancel();
+      });
+
+      _audioPlaybackCompleter = null;
+      _isPlaying = false;
+
+      if (!_audioForceStopped) {
+        onStateChange?.call(VoiceState.paused);
+        debugPrint('Local audio playback complete');
+      }
+    } catch (e) {
+      debugPrint('Error playing local audio: $e');
+      _audioPlaybackCompleter = null;
+      _isPlaying = false;
+    }
+  }
+
   /// Generate TTS audio and play it, returning the local file path for caching
   Future<String?> generateAndPlayTTS(String text, String voice) async {
     try {
@@ -1360,7 +1480,8 @@ class VoicePipelineService {
       // Reset force stop flag for new playback
       _audioForceStopped = false;
 
-      onStateChange?.call(VoiceState.speaking);
+      // Show "Thinking..." while generating TTS
+      onStateChange?.call(VoiceState.processing);
 
       final audioPath = await _textToSpeech(text, voice);
       if (audioPath == null) {
@@ -1373,6 +1494,9 @@ class VoicePipelineService {
         debugPrint('TTS aborted - force stopped during generation');
         return audioPath; // Return path but don't play
       }
+
+      // Now playing - show "Speaking..."
+      onStateChange?.call(VoiceState.speaking);
 
       // Play the audio
       try { await _player.stop(); } catch (_) {}
@@ -1648,8 +1772,9 @@ class VoicePipelineService {
   }
   
   /// Transcribe audio to text (for ChatPage record-to-text feature)
-  Future<String?> transcribeAudio(String audioPath) async {
-    return await _speechToText(audioPath);
+  /// If [language] is null, Whisper auto-detects (for multilingual translator)
+  Future<String?> transcribeAudio(String audioPath, {String? language = 'en'}) async {
+    return await _speechToText(audioPath, language: language);
   }
   
   /// Record audio for transcription (returns path to audio file)
@@ -1747,18 +1872,18 @@ Format note content nicely with line breaks, bullet points, and clear sections.
     return systemPrompt;
   }
 
-  Future<String?> _speechToText(String audioPath) async {
-    debugPrint('STT processing: $audioPath');
-    
+  Future<String?> _speechToText(String audioPath, {String? language = 'en'}) async {
+    debugPrint('STT processing: $audioPath (language: ${language ?? "auto"})');
+
     try {
       // Use OpenAI Whisper API
-      final transcription = await _openaiService.speechToText(audioPath);
-      
+      final transcription = await _openaiService.speechToText(audioPath, language: language);
+
       if (transcription != null && transcription.isNotEmpty) {
         debugPrint('Transcription received: $transcription');
         return transcription;
       }
-      
+
       debugPrint('No transcription received');
       return null;
     } catch (e) {

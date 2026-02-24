@@ -5,7 +5,6 @@ import '../models/models.dart';
 import '../providers/voice_provider.dart';
 import '../providers/reports_provider.dart';
 import '../utils/constants.dart';
-import '../face/control_bar.dart';
 import 'report_card.dart';
 import 'report_view_page.dart';
 
@@ -42,6 +41,8 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   String _searchQuery = '';
+  bool _isViewingFullReport = false; // True when ReportViewPage is open
+  int _currentPlayingIndex = -1; // Track index for auto-play
 
   @override
   bool get wantKeepAlive => true;
@@ -58,6 +59,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
       final voiceProvider = context.read<VoiceProvider>();
       voiceProvider.onOpenAndPlayReport = _openReportAndPlay;
       voiceProvider.onOpenLink = _openLink;
+      voiceProvider.onReportPlaybackComplete = _onReportPlaybackComplete;
     });
   }
 
@@ -67,6 +69,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
     final voiceProvider = context.read<VoiceProvider>();
     voiceProvider.onOpenAndPlayReport = null;
     voiceProvider.onOpenLink = null;
+    voiceProvider.onReportPlaybackComplete = null;
     _searchController.removeListener(_onSearchChanged);
     _searchFocusNode.removeListener(_onFocusChanged);
     _searchController.dispose();
@@ -98,6 +101,11 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
 
     if (!mounted) return;
 
+    // Track that we're viewing a full report
+    setState(() {
+      _isViewingFullReport = true;
+    });
+
     // Navigate to report view and auto-play
     Navigator.push(
       context,
@@ -111,15 +119,21 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
           onReportDeleted: () {
             refreshReports();
           },
-          onPause: widget.onPause,
-          onPlay: widget.onPlay,
           onRefresh: widget.onRefresh,
           onExit: widget.onExit,
+          onSkip: (ctx) => _skipToNextReportFrom(report, ctx),
         ),
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
       ),
-    );
+    ).then((_) {
+      // Reset flag when returning from report view
+      if (mounted) {
+        setState(() {
+          _isViewingFullReport = false;
+        });
+      }
+    });
   }
 
   /// Called by AI to open an external link
@@ -173,6 +187,12 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
     reportsProvider.loadReportCategories();
   }
 
+  /// Public method to start playing from the first report (called from scheduled check-in)
+  void startPlayback() {
+    debugPrint('ReportsPage: startPlayback called');
+    _onPlayFirstReport();
+  }
+
   /// Public method to change report filter (Live, History, Saved) - called from AI
   void setFilter(ReportFilter filter) {
     debugPrint('ReportsPage: Setting filter to $filter');
@@ -223,6 +243,11 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
 
     if (!mounted) return;
 
+    // Track that we're viewing a full report
+    setState(() {
+      _isViewingFullReport = true;
+    });
+
     Navigator.push(
       context,
       PageRouteBuilder(
@@ -235,15 +260,21 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
           onReportDeleted: () {
             refreshReports();
           },
-          onPause: widget.onPause,
-          onPlay: widget.onPlay,
           onRefresh: widget.onRefresh,
           onExit: widget.onExit,
+          onSkip: (ctx) => _skipToNextReportFrom(report, ctx),
         ),
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
       ),
-    );
+    ).then((_) {
+      // Reset flag when returning from report view
+      if (mounted) {
+        setState(() {
+          _isViewingFullReport = false;
+        });
+      }
+    });
   }
 
   void _deleteReport(Report report) {
@@ -365,22 +396,106 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
     }
   }
 
-  void _readReport(Report report) async {
+  void _playReport(Report report) async {
     final voiceProvider = context.read<VoiceProvider>();
-    await voiceProvider.readReport(report);
+
+    // If this report was paused, resume it
+    if (voiceProvider.currentPlayingReportId == report.id && voiceProvider.isReportAudioPaused) {
+      await voiceProvider.resumeReportAudio();
+    } else {
+      // Track index for auto-play
+      final reports = getCurrentReports();
+      _currentPlayingIndex = reports.indexWhere((r) => r.id == report.id);
+
+      // Stop any currently playing report and start this one
+      await voiceProvider.readReport(report);
+    }
   }
 
-  void _skipToNextReport(Report currentReport) {
-    // Get current reports and find next one
+  void _pauseReport() async {
+    final voiceProvider = context.read<VoiceProvider>();
+    await voiceProvider.pauseReportAudio();
+  }
+
+  /// Auto-play next report when current one completes
+  void _onReportPlaybackComplete(String completedReportId) {
+    debugPrint('AutoPlay: index=$_currentPlayingIndex, isViewingFullReport=$_isViewingFullReport');
+
+    if (!mounted) return;
+
+    final reports = getCurrentReports();
+    final nextIndex = _currentPlayingIndex + 1;
+
+    if (nextIndex < reports.length) {
+      final nextReport = reports[nextIndex];
+      debugPrint('AutoPlay: Playing next report: ${nextReport.title}');
+
+      if (_isViewingFullReport) {
+        _openReportAndPlay(nextReport.id);
+      } else {
+        _playReport(nextReport);
+      }
+    } else {
+      debugPrint('AutoPlay: End of list');
+      _currentPlayingIndex = -1;
+    }
+  }
+
+  /// Skip to next report from the current one (used in report view)
+  void _skipToNextReportFrom(Report currentReport, BuildContext reportViewContext) async {
+    final reportsProvider = context.read<ReportsProvider>();
+    final voiceProvider = context.read<VoiceProvider>();
+
+    // Stop current audio before skipping
+    await voiceProvider.stopReportAudio();
+
+    // Use the currently displayed reports (respects filter, category, and search)
     final reports = getCurrentReports();
     final currentIndex = reports.indexWhere((r) => r.id == currentReport.id);
 
+    debugPrint('Skip: currentIndex=$currentIndex, total=${reports.length}, reportId=${currentReport.id}');
+
+    Report? nextReport;
     if (currentIndex >= 0 && currentIndex < reports.length - 1) {
-      final nextReport = reports[currentIndex + 1];
-      _openReport(nextReport);
+      nextReport = reports[currentIndex + 1];
+      debugPrint('Skip: Moving to next report: ${nextReport.title}');
+    } else if (currentIndex == -1 && reports.isNotEmpty) {
+      // Current report not in list, just open the first one
+      nextReport = reports.first;
+      debugPrint('Skip: Current report not in list, opening first report');
+    }
+
+    if (nextReport != null) {
+      // Mark as announced
+      if (!reportsProvider.isReportAnnounced(nextReport.id)) {
+        reportsProvider.markAnnounced(nextReport.id);
+      }
+      // Replace current report view with next one (no flash of reports page)
+      final report = nextReport;
+      Navigator.pushReplacement(
+        reportViewContext,
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) => ReportViewPage(
+            report: report,
+            autoPlay: true,
+            onReportUpdated: (updatedReport) {
+              refreshReports();
+            },
+            onReportDeleted: () {
+              refreshReports();
+            },
+            onRefresh: widget.onRefresh,
+            onExit: widget.onExit,
+            onSkip: (ctx) => _skipToNextReportFrom(report, ctx),
+          ),
+          transitionDuration: Duration.zero,
+          reverseTransitionDuration: Duration.zero,
+        ),
+      );
     } else {
-      // No more reports, show message
-      ScaffoldMessenger.of(context).showSnackBar(
+      // No more reports
+      debugPrint('Skip: No more reports');
+      ScaffoldMessenger.of(reportViewContext).showSnackBar(
         const SnackBar(
           content: Text('No more reports'),
           duration: Duration(seconds: 2),
@@ -389,18 +504,154 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
     }
   }
 
-  /// Handle Wake button - triggers report check-in asking if now is a good time
-  void _onWakeForReports() async {
-    final voiceProvider = context.read<VoiceProvider>();
-    await voiceProvider.triggerReportCheckIn();
+  /// Handle Play button - starts playing the first report in the current list view
+  void _onPlayFirstReport() async {
+    // Use the currently displayed reports (respects filter, category, and search)
+    final reports = getCurrentReports();
+
+    if (reports.isEmpty) {
+      debugPrint('ReportsPage: No reports to play in current view');
+      return;
+    }
+
+    final firstReport = reports.first;
+    debugPrint('ReportsPage: Starting playback from first report: ${firstReport.title}');
+    _playReport(firstReport);
   }
 
-  /// Refresh both AI session and reports feed
-  Future<void> _refreshAll() async {
-    // Refresh AI session
-    widget.onRefresh();
-    // Reload reports from database
+  /// Build simple audio control buttons for reports
+  Widget _buildReportControls() {
+    return Consumer<VoiceProvider>(
+      builder: (context, voiceProvider, _) {
+        final isPlaying = voiceProvider.isReadingReport && !voiceProvider.isReportAudioPaused;
+
+        return Container(
+          margin: const EdgeInsets.only(
+            left: AppSpacing.lg,
+            right: AppSpacing.lg,
+            bottom: AppSpacing.lg,
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.md,
+          ),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2A2A2A),
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 20,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              // Refresh button
+              _buildControlButton(
+                icon: Icons.refresh,
+                label: 'Refresh',
+                color: Colors.green,
+                onTap: _handleRefresh,
+              ),
+              // Play/Pause button
+              _buildControlButton(
+                icon: isPlaying ? Icons.pause : Icons.play_arrow,
+                label: isPlaying ? 'Pause' : 'Play',
+                color: Colors.blue,
+                onTap: isPlaying ? _handlePause : _handlePlay,
+              ),
+              // Skip button
+              _buildControlButton(
+                icon: Icons.skip_next,
+                label: 'Skip',
+                color: AppColors.primaryOrange,
+                onTap: _handleSkip,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildControlButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 28),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Pause the current report audio
+  void _handlePause() {
+    context.read<VoiceProvider>().pauseReportAudio();
+  }
+
+  /// Play from top of list
+  void _handlePlay() {
+    _onPlayFirstReport();
+  }
+
+  /// Refresh page and stop any audio
+  Future<void> _handleRefresh() async {
+    await context.read<VoiceProvider>().stopReportAudio();
     await context.read<ReportsProvider>().loadReports();
+    await context.read<ReportsProvider>().loadReportCategories();
+  }
+
+  /// Skip to next report
+  void _handleSkip() {
+    final voiceProvider = context.read<VoiceProvider>();
+    final currentId = voiceProvider.currentPlayingReportId;
+
+    if (currentId == null) {
+      // Nothing playing, just start from top
+      _onPlayFirstReport();
+      return;
+    }
+
+    // Find current report and play next one
+    final reports = getCurrentReports();
+    final currentIndex = reports.indexWhere((r) => r.id == currentId);
+
+    if (currentIndex >= 0 && currentIndex < reports.length - 1) {
+      // Play next report
+      final nextReport = reports[currentIndex + 1];
+      _playReport(nextReport);
+    } else if (reports.isNotEmpty) {
+      // At end or not found, loop to first
+      _playReport(reports.first);
+    }
   }
 
   @override
@@ -544,8 +795,8 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
                               onOpen: () => _openReport(report),
                               onDelete: () => _deleteReport(report),
                               onSave: () => _toggleSaveReport(report),
-                              onRead: () => _readReport(report),
-                              onSkip: () => _skipToNextReport(report),
+                              onPlay: () => _playReport(report),
+                              onPause: () => _pauseReport(),
                             );
                           },
                         );
@@ -573,12 +824,7 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
 
             // Bottom control bar - hide when keyboard is visible
             if (!_isKeyboardVisible())
-              ControlBar(
-                onPause: widget.onPause,
-                onPlay: _onWakeForReports,
-                onRefresh: _refreshAll,
-                onExit: widget.onExit,
-              ),
+              _buildReportControls(),
           ],
         ),
       ),

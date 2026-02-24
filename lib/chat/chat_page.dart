@@ -20,10 +20,11 @@ enum ChatInputState {
   hasText,    // Has text, show send button
 }
 
-/// Chat/Image mode toggle
+/// Chat/Image/Translate mode toggle
 enum ChatMode {
   text,
   image,
+  translate,
 }
 
 class ChatPage extends StatefulWidget {
@@ -56,6 +57,27 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
   File? _selectedImage; // Reference image ready to send
   String? _currentImagePrompt; // Current prompt being generated
   final ImagePicker _imagePicker = ImagePicker();
+
+  // Translate mode state
+  String _languageA = 'English';
+  String _languageB = 'Spanish';
+  final List<_TranslationItem> _translationConversation = [];
+  bool _isTranslating = false;
+
+  static const List<String> _supportedLanguages = [
+    'English',
+    'Spanish',
+    'French',
+    'German',
+    'Italian',
+    'Portuguese',
+    'Chinese',
+    'Japanese',
+    'Korean',
+    'Arabic',
+    'Russian',
+    'Hindi',
+  ];
 
   @override
   bool get wantKeepAlive => true; // Preserve state when swiping between pages
@@ -180,16 +202,20 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
 
   Future<void> _stopRecording() async {
     if (_inputState != ChatInputState.recording) return;
-    
+
     final voiceProvider = context.read<VoiceProvider>();
-    
+
     setState(() {
       _inputState = ChatInputState.hasText;
       _textController.text = "Transcribing...";
     });
-    
-    final transcription = await voiceProvider.stopAndTranscribe();
-    
+
+    // For translate mode, use auto-detect (null) so Whisper keeps original language
+    // For other modes, use English
+    final transcription = await voiceProvider.stopAndTranscribe(
+      language: _mode == ChatMode.translate ? null : 'en',
+    );
+
     if (transcription != null && transcription.isNotEmpty) {
       setState(() {
         _textController.text = transcription;
@@ -225,18 +251,21 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
 
     if (_mode == ChatMode.text) {
       final voiceProvider = context.read<VoiceProvider>();
-      
+
       // Send text message (this adds to conversation and calls LLM)
       await voiceProvider.sendTextMessage(
         text: messageText,
         playAudio: !_isMuted,
       );
-      
+
       // Scroll to bottom
       _scrollToBottom();
-    } else {
+    } else if (_mode == ChatMode.image) {
       // Image mode - generate image
       await _generateImage(messageText);
+    } else {
+      // Translate mode
+      await _translateAndSpeak(messageText);
     }
   }
   
@@ -300,6 +329,76 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
         _isGeneratingImage = false;
         _currentImagePrompt = null;
       });
+    }
+  }
+
+  Future<void> _translateAndSpeak(String text) async {
+    setState(() {
+      _isTranslating = true;
+      _hasStartedConversation = true;
+    });
+    _scrollToBottom();
+
+    try {
+      final storageService = StorageService();
+      await storageService.init();
+      final openaiService = OpenAIService(storageService);
+
+      // Detect which language the input is in and translate to the other
+      final detectedLanguage = await openaiService.detectLanguage(text, [_languageA, _languageB]);
+      final targetLanguage = detectedLanguage == _languageA ? _languageB : _languageA;
+
+      // Translate the text
+      final translatedText = await openaiService.translateText(
+        text: text,
+        targetLanguage: targetLanguage,
+      );
+
+      if (translatedText != null) {
+        // Add to conversation
+        setState(() {
+          _translationConversation.add(_TranslationItem(
+            originalText: text,
+            originalLanguage: detectedLanguage,
+            translatedText: translatedText,
+            translatedLanguage: targetLanguage,
+          ));
+        });
+        _scrollToBottom();
+
+        // Speak the translation using TTS
+        if (mounted) {
+          final voice = _getVoiceForLanguage(targetLanguage);
+          final voiceProvider = context.read<VoiceProvider>();
+          await voiceProvider.speakText(translatedText, voice: voice);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error translating: $e');
+    } finally {
+      setState(() {
+        _isTranslating = false;
+      });
+    }
+  }
+
+  String _getVoiceForLanguage(String language) {
+    // Map languages to appropriate OpenAI TTS voices
+    switch (language.toLowerCase()) {
+      case 'spanish':
+      case 'italian':
+      case 'portuguese':
+        return 'nova'; // Good for Romance languages
+      case 'french':
+        return 'shimmer';
+      case 'german':
+        return 'onyx';
+      case 'japanese':
+      case 'korean':
+      case 'chinese':
+        return 'nova';
+      default:
+        return 'alloy'; // Default English voice
     }
   }
 
@@ -412,22 +511,29 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
                   child: _mode == ChatMode.text
                       ? Consumer<VoiceProvider>(
                           builder: (context, voiceProvider, _) {
-                            // Text mode: show chat when there are messages
                             final hasMessages = voiceProvider.conversation?.messages.isNotEmpty ?? false;
                             return hasMessages
                                 ? _buildChatView()
                                 : _buildInitialView();
                           },
                         )
-                      : Builder(
-                          builder: (context) {
-                            // Image mode: show conversation or initial view
-                            final hasContent = _imageConversation.isNotEmpty || _selectedImage != null;
-                            return hasContent
-                                ? _buildImageView()
-                                : _buildInitialView();
-                          },
-                        ),
+                      : _mode == ChatMode.image
+                          ? Builder(
+                              builder: (context) {
+                                final hasContent = _imageConversation.isNotEmpty || _selectedImage != null;
+                                return hasContent
+                                    ? _buildImageView()
+                                    : _buildInitialView();
+                              },
+                            )
+                          : Builder(
+                              builder: (context) {
+                                // Translate mode
+                                return _translationConversation.isNotEmpty
+                                    ? _buildTranslateView()
+                                    : _buildInitialView();
+                              },
+                            ),
                 ),
               ),
             ),
@@ -486,6 +592,15 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
         _inputState = ChatInputState.empty;
       });
       debugPrint('Image mode refresh: Cleared image conversation only');
+    } else if (_mode == ChatMode.translate) {
+      // Translate mode: Clear translation conversation
+      setState(() {
+        _translationConversation.clear();
+        _hasStartedConversation = false;
+        _textController.clear();
+        _inputState = ChatInputState.empty;
+      });
+      debugPrint('Translate mode refresh: Cleared translation conversation');
     } else {
       // Text mode: Clear text input and refresh voice/text conversation
       setState(() {
@@ -500,12 +615,27 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
   }
 
   Widget _buildInitialView() {
-    final title = _mode == ChatMode.text
-        ? 'AI Chat Bot'
-        : 'AI Artist';
-    final subtitle = _mode == ChatMode.text
-        ? 'How can I help you?'
-        : 'What can I create for you?';
+    String title;
+    String subtitle;
+    IconData fallbackIcon;
+
+    switch (_mode) {
+      case ChatMode.text:
+        title = 'AI Chat Bot';
+        subtitle = 'How can I help you?';
+        fallbackIcon = Icons.chat;
+        break;
+      case ChatMode.image:
+        title = 'AI Artist';
+        subtitle = 'What can I create for you?';
+        fallbackIcon = Icons.palette;
+        break;
+      case ChatMode.translate:
+        title = 'AI Translator';
+        subtitle = 'Speak in either language';
+        fallbackIcon = Icons.translate;
+        break;
+    }
 
     return Center(
       child: Column(
@@ -523,24 +653,19 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
               ),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(23), // Slightly smaller to fit inside border
+              borderRadius: BorderRadius.circular(23),
               child: Image.asset(
                 'assets/icon/icon.png',
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) {
-                  // Fallback if image not found
-                  return Icon(
-                    _mode == ChatMode.text ? Icons.chat : Icons.palette,
-                    size: 60,
-                    color: Colors.white,
-                  );
+                  return Icon(fallbackIcon, size: 60, color: Colors.white);
                 },
               ),
             ),
           ),
-          
+
           const SizedBox(height: AppSpacing.lg),
-          
+
           // Title
           Text(
             title,
@@ -551,9 +676,9 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
               color: Colors.white,
             ),
           ),
-          
+
           const SizedBox(height: AppSpacing.sm),
-          
+
           // Subtitle
           Text(
             subtitle,
@@ -563,7 +688,80 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
               color: Colors.white.withOpacity(0.6),
             ),
           ),
+
+          // Language selectors for translate mode
+          if (_mode == ChatMode.translate) ...[
+            const SizedBox(height: AppSpacing.xl),
+            _buildLanguageSelectors(),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildLanguageSelectors() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Language A dropdown
+        _buildLanguageDropdown(
+          value: _languageA,
+          onChanged: (lang) => setState(() => _languageA = lang!),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        // Swap button
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              final temp = _languageA;
+              _languageA = _languageB;
+              _languageB = temp;
+            });
+          },
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.blue,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.swap_horiz, color: Colors.white),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        // Language B dropdown
+        _buildLanguageDropdown(
+          value: _languageB,
+          onChanged: (lang) => setState(() => _languageB = lang!),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLanguageDropdown({
+    required String value,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        dropdownColor: const Color(0xFF2A2A2A),
+        style: const TextStyle(
+          fontFamily: AppTextStyles.fontFamily,
+          color: Colors.white,
+          fontSize: 14,
+        ),
+        underline: const SizedBox(),
+        icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+        items: _supportedLanguages.map((lang) {
+          return DropdownMenuItem(value: lang, child: Text(lang));
+        }).toList(),
+        onChanged: onChanged,
       ),
     );
   }
@@ -647,7 +845,128 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
       children: items,
     );
   }
-  
+
+  Widget _buildTranslateView() {
+    return Column(
+      children: [
+        // Language selectors at top
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: _buildLanguageSelectors(),
+        ),
+        // Translation conversation
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(AppSpacing.md),
+            itemCount: _translationConversation.length + (_isTranslating ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index == _translationConversation.length && _isTranslating) {
+                return _buildTranslatingIndicator();
+              }
+              final item = _translationConversation[index];
+              return _buildTranslationBubble(item);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTranslationBubble(_TranslationItem item) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Original text (right-aligned, grey)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: const Color(0xFF4A4A4A),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    item.originalLanguage,
+                    style: TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.originalText,
+                    style: const TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          // Translated text (left-aligned, blue border)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: Colors.black,
+                border: Border.all(color: Colors.blue, width: 1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.translatedLanguage,
+                    style: TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.5),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.translatedText,
+                    style: const TextStyle(
+                      fontFamily: AppTextStyles.fontFamily,
+                      fontSize: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTranslatingIndicator() {
+    return const Padding(
+      padding: EdgeInsets.all(AppSpacing.md),
+      child: Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      ),
+    );
+  }
+
   /// Build a user prompt bubble (right-aligned) with optional reference image
   Widget _buildUserPromptBubble(String text, File? referenceImage) {
     return Padding(
@@ -979,7 +1298,7 @@ class ChatPageState extends State<ChatPage> with AutomaticKeepAliveClientMixin {
     String placeholder;
     if (_inputState == ChatInputState.recording) {
       placeholder = '🔴 Recording...';
-    } else if (_mode == ChatMode.text) {
+    } else if (_mode == ChatMode.text || _mode == ChatMode.translate) {
       placeholder = 'Type or speak...';
     } else {
       placeholder = 'Describe your image...';
@@ -1110,6 +1429,13 @@ class _ModeToggle extends StatelessWidget {
             label: 'Image',
             isSelected: currentMode == ChatMode.image,
             onTap: () => onModeChanged(ChatMode.image),
+          ),
+          const SizedBox(width: 4),
+          _ToggleOption(
+            icon: Icons.translate,
+            label: 'Translate',
+            isSelected: currentMode == ChatMode.translate,
+            onTap: () => onModeChanged(ChatMode.translate),
           ),
         ],
       ),
@@ -1284,5 +1610,20 @@ class _ImageConversationItem {
       imageUrl: imageUrl,
     );
   }
+}
+
+/// Represents a translation item
+class _TranslationItem {
+  final String originalText;
+  final String originalLanguage;
+  final String translatedText;
+  final String translatedLanguage;
+
+  const _TranslationItem({
+    required this.originalText,
+    required this.originalLanguage,
+    required this.translatedText,
+    required this.translatedLanguage,
+  });
 }
 

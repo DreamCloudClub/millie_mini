@@ -97,159 +97,126 @@ class ReportSchedulerService {
     }
 
     try {
-      // Get active schedules
+      // Get active schedules (time-based only, no category filtering)
       final activeSchedules = await ReportSettingsService.getActiveSchedules();
       if (activeSchedules.isEmpty) {
         return;
       }
 
-      // Check each schedule
+      // Check if any schedule should trigger based on frequency
       final now = DateTime.now();
-      final categoriesToAnnounce = <String>{};
+      bool shouldAnnounce = false;
+      int minFrequency = 30; // Default frequency
 
       for (final schedule in activeSchedules) {
-        // Create a unique key for this schedule based on categories
-        final categoryKey = schedule.categories.isEmpty
-            ? 'all'
-            : schedule.categories.join(',');
-        final lastTime = _lastAnnouncementTimes[categoryKey];
+        final lastTime = _lastAnnouncementTimes['default'];
 
         // Check if enough time has passed since last announcement
         if (lastTime != null) {
           final minutesSinceLast = now.difference(lastTime).inMinutes;
           if (minutesSinceLast < schedule.frequencyMinutes) {
-            continue; // Not time yet
+            continue; // Not time yet for this schedule
           }
         }
 
-        // This schedule should be checked - add its categories
-        if (schedule.categories.isEmpty) {
-          // Empty categories means all
-          categoriesToAnnounce.add('all');
-        } else {
-          for (final cat in schedule.categories) {
-            categoriesToAnnounce.add(cat.toLowerCase());
-          }
-        }
+        // This schedule should trigger
+        shouldAnnounce = true;
+        minFrequency = schedule.frequencyMinutes;
+        break; // One active schedule is enough
       }
 
-      if (categoriesToAnnounce.isEmpty) {
+      if (!shouldAnnounce) {
         return;
       }
 
-      // Get enabled watchlist categories
+      // Get enabled watchlist categories (user's preferences from settings)
       final watchlistCategories = await ReportsService.getEnabledWatchlistCategories();
       if (watchlistCategories.isEmpty) {
         return;
       }
 
-      // Filter to categories that are in both watchlist and active schedules
-      List<String>? filterCategories;
-      if (categoriesToAnnounce.contains('all')) {
-        filterCategories = watchlistCategories;
-      } else {
-        filterCategories = watchlistCategories
-            .where((c) => categoriesToAnnounce.contains(c))
-            .toList();
-
-        if (filterCategories.isEmpty) {
-          return;
-        }
-      }
-
-      // Get unannounced reports
+      // Get unannounced reports from user's watchlist
       final unannounced = await ReportsService.getUnannounced(
-        categories: filterCategories,
+        categories: watchlistCategories,
       );
 
       if (unannounced.isEmpty) {
         return;
       }
 
-      debugPrint('ReportSchedulerService: Found ${unannounced.length} unannounced reports');
+      debugPrint('ReportSchedulerService: Found ${unannounced.length} unannounced reports, triggering check-in');
 
-      // Queue reports for announcement
-      _pendingQueue.clear();
-      _pendingQueue.addAll(unannounced);
+      // Update last announcement time
+      _lastAnnouncementTimes['default'] = now;
 
-      // Try to start announcement
+      // Try to start announcement (just asks if user has time)
       await _tryStartAnnouncement();
     } catch (e) {
       debugPrint('ReportSchedulerService: Error checking schedules: $e');
     }
   }
 
-  /// Try to start an announcement (if voice is available)
+  /// Try to start a check-in (if voice is available)
   Future<void> _tryStartAnnouncement() async {
-    if (_voiceProvider == null || _pendingQueue.isEmpty) {
+    if (_voiceProvider == null) {
       return;
     }
 
     // Only announce when user is in conversation (past launch button)
     if (!_isInConversation) {
-      debugPrint('ReportSchedulerService: Not in conversation, skipping announcement');
+      debugPrint('ReportSchedulerService: Not in conversation, skipping check-in');
       return;
     }
 
     // Don't interrupt if a report is currently being read
     if (_voiceProvider!.isReadingReport) {
-      debugPrint('ReportSchedulerService: Report is being read, will retry later');
+      debugPrint('ReportSchedulerService: Report is being read, skipping check-in');
       return;
     }
 
     // Check if voice is in a state that allows announcements
     final state = _voiceProvider!.state;
     if (state != VoiceState.paused && state != VoiceState.sleep) {
-      debugPrint('ReportSchedulerService: Voice busy (state=$state), will retry later');
+      debugPrint('ReportSchedulerService: Voice busy (state=$state), skipping check-in');
       return;
     }
 
-    // Start announcement session
-    final report = _pendingQueue.first;
-    _pendingQueue.removeAt(0);
-
-    debugPrint('ReportSchedulerService: Starting announcement for "${report.title}"');
+    debugPrint('ReportSchedulerService: Triggering report check-in');
 
     _isSessionActive = true;
 
-    // Update last announcement time for this category
-    final categoryKey = '${report.category}:${report.subcategory ?? ''}';
-    _lastAnnouncementTimes[categoryKey] = DateTime.now();
-
-    // Trigger announcement through ReportsProvider
-    _reportsProvider?.onAnnounceReport?.call(report);
+    // Trigger the simple check-in question through VoiceProvider
+    // Pass a dummy report - the actual report selection happens on the Reports page
+    final now = DateTime.now();
+    final dummyReport = Report(
+      id: '',
+      category: '',
+      title: '',
+      summary: '',
+      content: '',
+      createdAt: now,
+      expiresAt: now.add(const Duration(hours: 48)),
+    );
+    _reportsProvider?.onAnnounceReport?.call(dummyReport);
   }
 
   /// Called when voice transitions to paused state
-  /// Check if we have pending announcements
   void checkPendingOnPause() {
-    if (_pendingQueue.isNotEmpty && !_isSessionActive) {
-      debugPrint('ReportSchedulerService: Voice paused, checking pending queue');
-      _tryStartAnnouncement();
-    }
+    // No longer needed - check-in is one-time per schedule trigger
   }
 
   /// Called when an announcement is complete
   void onAnnouncementComplete() {
     _isSessionActive = false;
-
-    // Check if there are more reports in queue
-    if (_pendingQueue.isNotEmpty) {
-      debugPrint('ReportSchedulerService: ${_pendingQueue.length} more reports in queue');
-      // Give a brief pause before next announcement
-      Future.delayed(const Duration(seconds: 2), () {
-        _tryStartAnnouncement();
-      });
-    }
   }
 
-  /// Clear the pending queue
+  /// Clear the pending state
   void clearQueue() {
     _pendingQueue.clear();
     _isSessionActive = false;
   }
 
-  /// Get number of pending reports
+  /// Get number of pending reports (deprecated, kept for compatibility)
   int get pendingCount => _pendingQueue.length;
 
   /// Whether there are pending announcements

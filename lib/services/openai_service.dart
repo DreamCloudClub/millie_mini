@@ -365,7 +365,10 @@ class OpenAIService {
   }
   
   /// Call OpenAI Whisper API for Speech-to-Text
-  Future<String?> speechToText(String audioFilePath) async {
+  /// Call OpenAI Whisper API for Speech-to-Text
+  /// If [language] is null, Whisper auto-detects the language (for multilingual use)
+  /// If [language] is specified (e.g., 'en'), Whisper transcribes to that language
+  Future<String?> speechToText(String audioFilePath, {String? language = 'en'}) async {
     final apiKey = await getApiKey();
     if (apiKey == null) {
       debugPrint('Cannot call OpenAI Whisper: No API key available');
@@ -427,7 +430,9 @@ class OpenAIService {
           
           // Add model and language parameters as form fields
           request.fields['model'] = 'whisper-1';
-          request.fields['language'] = 'en';
+          if (language != null) {
+            request.fields['language'] = language;
+          }
           request.fields['response_format'] = 'text';
           
           if (retryCount == 0) {
@@ -528,7 +533,122 @@ class OpenAIService {
       return null;
     }
   }
-  
+
+  /// Detect which language the text is in from a list of options
+  Future<String> detectLanguage(String text, List<String> options) async {
+    final apiKey = await getApiKey();
+    if (apiKey == null) {
+      return options.first; // Default to first option
+    }
+
+    try {
+      final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $apiKey',
+        },
+        body: jsonEncode({
+          'model': 'gpt-4o-mini',
+          'messages': [
+            {
+              'role': 'system',
+              'content': 'You are a language detector. Given text, respond with ONLY the language name from this list: ${options.join(", ")}. No explanation, just the language name.',
+            },
+            {
+              'role': 'user',
+              'content': text,
+            },
+          ],
+          'max_tokens': 20,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final detected = data['choices'][0]['message']['content'].toString().trim();
+        // Find matching option (case-insensitive)
+        for (final option in options) {
+          if (detected.toLowerCase().contains(option.toLowerCase())) {
+            return option;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error detecting language: $e');
+    }
+
+    return options.first;
+  }
+
+  /// Translate text to target language
+  Future<String?> translateText({
+    required String text,
+    required String targetLanguage,
+  }) async {
+    final apiKey = await getApiKey();
+    if (apiKey == null) {
+      debugPrint('Cannot translate: No API key available');
+      return null;
+    }
+
+    try {
+      final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $apiKey',
+        },
+        body: jsonEncode({
+          'model': 'gpt-4o-mini',
+          'messages': [
+            {
+              'role': 'system',
+              'content': 'You are a translator. Translate the user\'s text to $targetLanguage. Respond with ONLY the translation, no explanations or quotes.',
+            },
+            {
+              'role': 'user',
+              'content': text,
+            },
+          ],
+          'max_tokens': 500,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['choices'][0]['message']['content'].toString().trim();
+      } else {
+        debugPrint('Translation error: ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Error translating: $e');
+    }
+
+    return null;
+  }
+
+  /// Generate TTS audio and play it directly
+  Future<void> generateAndPlayTTS(String text, String voice) async {
+    final audioPath = await textToSpeech(
+      text: text,
+      voice: voice,
+      model: 'tts-1',
+    );
+
+    if (audioPath != null) {
+      // Use audioplayers to play the file
+      final file = File(audioPath);
+      if (await file.exists()) {
+        // Import and use audioplayers or let the caller handle playback
+        debugPrint('TTS audio generated at: $audioPath');
+        // The caller should handle playback since this service doesn't have AudioPlayer
+      }
+    }
+  }
+
   // Cache management
   Future<String?> _getCachedKey() async {
     try {

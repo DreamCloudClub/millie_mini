@@ -203,6 +203,16 @@ class _ConversationPageState extends State<ConversationPage> {
       _jumpToPage(reportsPageIndex);
     };
 
+    // Set up callback for scheduled report check-in (navigate + start playing)
+    voiceProvider.onNavigateToReportsAndPlay = () {
+      debugPrint('Reports navigation + playback requested (scheduled check-in)');
+      _jumpToPage(reportsPageIndex);
+      // Delay slightly to let the page render, then start playback
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _reportsPageKey.currentState?.startPlayback();
+      });
+    };
+
     // Note: Game/lesson mode callbacks (onStartLessonMode, onExitLessonMode) are
     // wired internally in VoiceProvider._setupGameController()
 

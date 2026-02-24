@@ -299,7 +299,7 @@ class _AgentProfileCardState extends State<_AgentProfileCard> {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, AppSpacing.lg),
           child: Column(
             children: [
-              // Agent display with arrows
+              // Face with arrows (arrows centered on face only)
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -328,41 +328,13 @@ class _AgentProfileCardState extends State<_AgentProfileCard> {
 
                   const SizedBox(width: 16),
 
-                  // Agent info
-                  SizedBox(
-                    width: faceSize,
-                    child: Column(
-                      children: [
-                        // Face Preview
-                        FacePreview(
-                          faceColor: agent.faceColor,
-                          eyeShape: agent.eyeShape,
-                          faceImageId: agent.faceImageId,
-                          customFaceId: agent.customFaceId,
-                          size: faceSize,
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        // Agent name
-                        Text(
-                          agent.name,
-                          style: const TextStyle(
-                            fontFamily: AppTextStyles.fontFamily,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        // Voice + Personality
-                        Text(
-                          '${agent.voice} • ${personality?.name ?? 'Home'}',
-                          style: AppTextStyles.bodySmall.copyWith(
-                            fontSize: 16,
-                            color: AppColors.textLight,
-                          ),
-                        ),
-                      ],
-                    ),
+                  // Face Preview only
+                  FacePreview(
+                    faceColor: agent.faceColor,
+                    eyeShape: agent.eyeShape,
+                    faceImageId: agent.faceImageId,
+                    customFaceId: agent.customFaceId,
+                    size: faceSize,
                   ),
 
                   const SizedBox(width: 16),
@@ -388,6 +360,28 @@ class _AgentProfileCardState extends State<_AgentProfileCard> {
                   else
                     const SizedBox(width: 40),
                 ],
+              ),
+
+              const SizedBox(height: AppSpacing.md),
+
+              // Agent name
+              Text(
+                agent.name,
+                style: const TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              // Voice + Personality
+              Text(
+                '${agent.voice} • ${personality?.name ?? 'Home'}',
+                style: AppTextStyles.bodySmall.copyWith(
+                  fontSize: 16,
+                  color: AppColors.textLight,
+                ),
               ),
 
               // Page indicator dots
@@ -730,7 +724,7 @@ class _ReportsCard extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  schedule.categoryDisplay,
+                                  schedule.timeRangeDisplay,
                                   style: AppTextStyles.bodyMedium.copyWith(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w500,
@@ -738,7 +732,7 @@ class _ReportsCard extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${schedule.timeRangeDisplay} • ${schedule.daysDisplay} • ${schedule.frequency.displayName}',
+                                  '${schedule.daysDisplay} • ${schedule.frequency.displayName}',
                                   style: AppTextStyles.bodySmall,
                                 ),
                               ],

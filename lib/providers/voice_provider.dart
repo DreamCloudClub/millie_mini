@@ -34,6 +34,11 @@ class VoiceProvider extends ChangeNotifier {
   bool _isInReportMode = false; // When true, bypass OpenClaw for report conversations
   bool _isAwaitingReportCheckIn = false; // True only during "Is now a good time?" question
   bool _isReadingReport = false; // True while playing a report audio
+  bool _isReportAudioPaused = false; // True when report audio is paused mid-playback
+  String? _currentPlayingReportId; // ID of the report currently playing
+
+  /// Callback when report playback completes (for auto-play next)
+  void Function(String reportId)? onReportPlaybackComplete;
   final NoteToolsHandler _noteToolsHandler = NoteToolsHandler();
 
   VoiceState _state = VoiceState.sleep;
@@ -115,86 +120,51 @@ class VoiceProvider extends ChangeNotifier {
   Report? _pendingScheduledReport;
 
   /// Announce a new report via TTS (proactive announcement from schedule)
-  /// First asks if it's a good time, then announces the report if user says yes
+  /// Asks if it's a good time, then navigates to reports page and starts playing if yes
   Future<void> _announceReport(Report report) async {
+    // Only announce if there's an active session (after launch)
+    if (_pendingAgentId == null) {
+      debugPrint('VoiceProvider: Skipping report announcement - no active session (Dashboard page)');
+      return;
+    }
+
+    // Don't interrupt lessons or games
+    if (_gameController.isActive || _gameController.isSelected) {
+      debugPrint('VoiceProvider: Skipping report announcement - lesson/game in progress');
+      return;
+    }
+
     // Only announce if in paused or sleep state
     if (_state != VoiceState.paused && _state != VoiceState.sleep) {
       debugPrint('VoiceProvider: Skipping report announcement - active conversation');
       return;
     }
 
-    debugPrint('VoiceProvider: Starting scheduled report check-in for: ${report.title}');
+    debugPrint('VoiceProvider: Starting scheduled report check-in');
 
-    // Enable report mode to bypass OpenClaw
+    // Enable report check-in mode
     _isInReportMode = true;
-    _isAwaitingReportCheckIn = true; // Fast-exit on "no" for this question only
-    _noteToolsHandler.forcedIntents = {IntentCategory.reports}; // Force reports tools
-    _updateOpenClawHandler();
+    _isAwaitingReportCheckIn = true; // Handles both yes and no responses without LLM
 
-    // Store the pending report so we can read it after user confirms
-    _pendingScheduledReport = report;
-
-    // Build check-in message - ask if it's a good time first
+    // Build check-in message
     final username = _pendingUsername ?? 'there';
     final agentName = _pendingAgentName ?? 'Millie';
-    final checkInMessage = "Hey $username, it's me $agentName. Is now a good time for a quick news update?";
-
-    // Build the full report content for when user says yes
-    final reportContent = "${report.title}. ${report.summary}. ${report.content}";
+    final checkInMessage = "Hey $username, it's me $agentName. Do you have time for a news update?";
 
     try {
       await _pipeline.stopSleepMode();
+
+      // Start fresh conversation
+      _conversation = Conversation.start(_pendingAgentId ?? '');
+      addAssistantMessage(checkInMessage);
 
       // Process personality prompt
       final processedPersonalityPrompt = _pendingPersonalityPrompt != null
           ? replaceAgentNamePlaceholder(_pendingPersonalityPrompt!, _pendingAgentName)
           : null;
 
-      // Start fresh conversation with context about pending report
-      _conversation = Conversation.start(_pendingAgentId ?? '');
-
-      // Get all live reports for skip/next functionality
-      final liveReports = _reportsProvider?.filteredLiveReports ?? [];
-
-      // Find the index of the current report in the queue
-      final currentIndex = liveReports.indexWhere((r) => r.id == report.id);
-
-      // Build context with all reports so user can skip to others
-      final reportsContext = StringBuffer();
-      reportsContext.writeln('[SYSTEM: You have a ${report.category} news report ready to share.');
-      reportsContext.writeln('');
-      reportsContext.writeln('CURRENT REPORT TO ANNOUNCE:');
-      reportsContext.writeln('Title: ${report.title}');
-      reportsContext.writeln('Summary: ${report.summary}');
-      reportsContext.writeln('Full Content: ${report.content}');
-
-      // Include other reports in queue for skip/next
-      if (liveReports.length > 1) {
-        reportsContext.writeln('');
-        reportsContext.writeln('OTHER REPORTS IN QUEUE (for skip/next):');
-        for (var i = 0; i < liveReports.length; i++) {
-          if (liveReports[i].id != report.id) {
-            final r = liveReports[i];
-            reportsContext.writeln('');
-            reportsContext.writeln('--- REPORT (ID: ${r.id}): ${r.title} ---');
-            reportsContext.writeln('Category: ${r.category}');
-            reportsContext.writeln('Summary: ${r.summary}');
-          }
-        }
-      }
-
-      reportsContext.writeln('');
-      reportsContext.writeln('INSTRUCTIONS:');
-      reportsContext.writeln('1. If user says yes to check-in, briefly mention the title then respond with ONLY: [OPEN_REPORT:${report.id}]');
-      reportsContext.writeln('2. If user says yes/more/read it/play it - respond with ONLY: [OPEN_REPORT:${report.id}]');
-      reportsContext.writeln('3. If user says skip/next/pass, briefly mention the next report title then respond with ONLY: [OPEN_REPORT:next_report_id]');
-      reportsContext.writeln('4. If no more reports, say "That\'s all the reports for now."');
-      reportsContext.writeln('IMPORTANT: When opening a report, your response should be ONLY the [OPEN_REPORT:id] marker with no other text.]');
-
-      addUserMessage(reportsContext.toString());
-      addAssistantMessage(checkInMessage);
-
       // Play check-in and start listening for yes/no
+      // Response is handled in onTranscription via _isAwaitingReportCheckIn
       await _pipeline.playIntroMessage(
         checkInMessage,
         _pendingVoice ?? 'alloy',
@@ -210,14 +180,10 @@ class VoiceProvider extends ChangeNotifier {
         getConversationHistory: () => getConversationHistory(),
       );
 
-      // Mark as announced (we asked about it)
-      await _reportsProvider?.markAnnounced(report.id);
-
     } catch (e) {
       debugPrint('VoiceProvider: Error in report check-in: $e');
-      _pendingScheduledReport = null;
       _isInReportMode = false;
-      _updateOpenClawHandler();
+      _isAwaitingReportCheckIn = false;
     }
   }
 
@@ -235,16 +201,22 @@ class VoiceProvider extends ChangeNotifier {
     debugPrint('VoiceProvider: Reading report: ${report.title}');
 
     _isReadingReport = true;
+    _isReportAudioPaused = false; // Reset paused flag when starting new playback
+    _currentPlayingReportId = report.id;
     notifyListeners();
 
     try {
       // Stop any current audio
       await _pipeline.forceStopAudio();
 
+      // Always check database for latest audioUrl (another user may have cached it)
+      final freshReport = await ReportsService.getReport(report.id);
+      final audioUrl = freshReport?.audioUrl ?? report.audioUrl;
+
       // Check if we have cached audio
-      if (report.audioUrl != null && report.audioUrl!.isNotEmpty) {
-        debugPrint('VoiceProvider: Playing cached audio from ${report.audioUrl}');
-        await _playReportFromUrl(report.audioUrl!);
+      if (audioUrl != null && audioUrl.isNotEmpty) {
+        debugPrint('VoiceProvider: Playing cached audio from $audioUrl');
+        await _playReportFromUrl(audioUrl);
       } else {
         // Generate TTS and cache it
         debugPrint('VoiceProvider: Generating new audio for report');
@@ -259,10 +231,31 @@ class VoiceProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('VoiceProvider: Error reading report: $e');
     } finally {
-      _isReadingReport = false;
-      notifyListeners();
+      debugPrint('VoiceProvider: readReport finally block - reportId=${report.id}, currentPlayingId=$_currentPlayingReportId, isPaused=$_isReportAudioPaused');
+
+      // Only clear if this report is still the current one (not replaced by another)
+      if (_currentPlayingReportId == report.id) {
+        _isReadingReport = false;
+        _currentPlayingReportId = null;
+        notifyListeners();
+
+        // Notify that playback completed (for auto-play next)
+        // Only if not paused (paused means user stopped it intentionally)
+        if (!_isReportAudioPaused) {
+          debugPrint('VoiceProvider: Calling onReportPlaybackComplete callback (callback set: ${onReportPlaybackComplete != null})');
+          onReportPlaybackComplete?.call(report.id);
+        } else {
+          debugPrint('VoiceProvider: Skipping callback - audio was paused');
+        }
+      } else {
+        debugPrint('VoiceProvider: Skipping callback - report ID mismatch (another report started)');
+        notifyListeners();
+      }
     }
   }
+
+  /// Get the ID of the currently playing report
+  String? get currentPlayingReportId => _currentPlayingReportId;
 
   /// Play report audio from cached URL
   Future<void> _playReportFromUrl(String audioUrl) async {
@@ -274,67 +267,147 @@ class VoiceProvider extends ChangeNotifier {
     }
   }
 
-  /// Generate TTS for report, upload to storage, cache URL in database
+  /// Pause report audio playback
+  Future<void> pauseReportAudio() async {
+    debugPrint('VoiceProvider: Pausing report audio');
+    _isReportAudioPaused = true;
+    await _pipeline.pauseAudio();
+    transitionTo(VoiceState.paused);
+  }
+
+  /// Resume report audio playback (only if paused mid-playback)
+  Future<void> resumeReportAudio() async {
+    if (_isReportAudioPaused) {
+      debugPrint('VoiceProvider: Resuming report audio');
+      _isReportAudioPaused = false;
+      transitionTo(VoiceState.speaking);
+      await _pipeline.resumeAudio();
+    } else {
+      debugPrint('VoiceProvider: No paused report audio to resume');
+    }
+  }
+
+  /// Check if report audio is paused mid-playback
+  bool get isReportAudioPaused => _isReportAudioPaused;
+
+  /// Restart report audio from beginning (no re-TTS, stays paused)
+  Future<void> restartReportAudio() async {
+    debugPrint('VoiceProvider: Resetting report audio to beginning (paused)');
+    _isReportAudioPaused = true; // Mark as paused so Play will resume
+    transitionTo(VoiceState.paused);
+    await _pipeline.restartAudio();
+  }
+
+  /// Stop report audio and reset
+  Future<void> stopReportAudio() async {
+    debugPrint('VoiceProvider: Stopping report audio');
+    await _pipeline.forceStopAudio();
+    _isReadingReport = false;
+    _isReportAudioPaused = false;
+    _currentPlayingReportId = null;
+    transitionTo(VoiceState.paused);
+    notifyListeners();
+  }
+
+  /// Speak text using TTS (for translator, etc.)
+  Future<void> speakText(String text, {String? voice}) async {
+    debugPrint('VoiceProvider: Speaking text: ${text.substring(0, text.length > 50 ? 50 : text.length)}...');
+    await _pipeline.generateAndPlayTTS(text, voice ?? _pendingVoice ?? 'alloy');
+  }
+
+  /// Generate TTS for report, start playback, and cache in background
   Future<void> _generateAndCacheReportAudio(Report report) async {
-    // Build intro + full report message
-    final username = _pendingUsername ?? 'there';
-    final agentName = _pendingAgentName ?? 'Millie';
-    final message = "Hey $username, it's me $agentName with a report update. ${report.title}. ${report.content}";
+    // Build report message - just title and content, no intro
+    final message = "${report.title}. ${report.content}";
 
-    // Process personality prompt
-    final processedPersonalityPrompt = _pendingPersonalityPrompt != null
-        ? replaceAgentNamePlaceholder(_pendingPersonalityPrompt!, _pendingAgentName)
-        : null;
-
-    // Generate TTS and play (this returns the local file path)
-    final audioPath = await _pipeline.generateAndPlayTTS(
+    // Generate TTS first (returns path immediately after generation, before playback)
+    final audioPath = await _pipeline.generateTTSOnly(
       message,
       _pendingVoice ?? 'alloy',
     );
 
+    debugPrint('VoiceProvider: TTS generated audioPath: $audioPath');
+
     if (audioPath != null) {
-      // Upload to Supabase Storage and get public URL
-      final audioUrl = await _uploadReportAudio(report.id, audioPath);
+      // Start upload in background (don't await) with error handling
+      _uploadAndCacheAudio(report.id, audioPath).catchError((e) {
+        debugPrint('VoiceProvider: Background upload error: $e');
+      });
+
+      // Start playback (this will await until done)
+      await _pipeline.playLocalAudio(audioPath);
+    } else {
+      debugPrint('VoiceProvider: TTS failed - audioPath is null');
+    }
+  }
+
+  /// Upload audio and save URL to database (runs in background)
+  Future<void> _uploadAndCacheAudio(String reportId, String audioPath) async {
+    try {
+      debugPrint('VoiceProvider: ===== STARTING BACKGROUND UPLOAD =====');
+      debugPrint('VoiceProvider: Report ID: $reportId');
+      debugPrint('VoiceProvider: Audio path: $audioPath');
+
+      final audioUrl = await _uploadReportAudio(reportId, audioPath);
 
       if (audioUrl != null) {
-        // Save URL to database for future use
-        await ReportsService.updateAudioUrl(report.id, audioUrl);
-        debugPrint('VoiceProvider: Cached audio URL: $audioUrl');
+        debugPrint('VoiceProvider: Upload successful! URL: $audioUrl');
+        debugPrint('VoiceProvider: Saving to database...');
+        final success = await ReportsService.updateAudioUrl(reportId, audioUrl);
+        debugPrint('VoiceProvider: ===== DATABASE UPDATE: $success =====');
+
+        // Refresh reports so local objects have the new audioUrl
+        if (success && _reportsProvider != null) {
+          await _reportsProvider!.loadReports();
+          debugPrint('VoiceProvider: Reports refreshed with cached audio URL');
+        }
+      } else {
+        debugPrint('VoiceProvider: ===== UPLOAD FAILED - URL IS NULL =====');
       }
+    } catch (e, stack) {
+      debugPrint('VoiceProvider: ===== UPLOAD EXCEPTION: $e =====');
+      debugPrint('VoiceProvider: Stack: $stack');
     }
   }
 
   /// Upload audio file to Supabase Storage
   Future<String?> _uploadReportAudio(String reportId, String localPath) async {
     try {
+      print('>>> UPLOAD: Checking file: $localPath');
       final file = File(localPath);
-      if (!await file.exists()) {
-        debugPrint('VoiceProvider: Audio file not found: $localPath');
+      final exists = await file.exists();
+      print('>>> UPLOAD: File exists: $exists');
+
+      if (!exists) {
+        print('>>> UPLOAD: ERROR - File not found!');
         return null;
       }
 
+      print('>>> UPLOAD: Reading bytes...');
       final bytes = await file.readAsBytes();
       final fileName = 'report_$reportId.mp3';
+      print('>>> UPLOAD: Size: ${bytes.length} bytes, name: $fileName');
 
       final supabase = Supabase.instance.client;
 
-      // Upload to 'report-audio' bucket
+      print('>>> UPLOAD: Uploading to bucket "report-audio"...');
       await supabase.storage
           .from('report-audio')
           .uploadBinary(fileName, bytes, fileOptions: const FileOptions(
             contentType: 'audio/mpeg',
             upsert: true,
           ));
+      print('>>> UPLOAD: Upload complete!');
 
-      // Get public URL
       final publicUrl = supabase.storage
           .from('report-audio')
           .getPublicUrl(fileName);
 
-      debugPrint('VoiceProvider: Uploaded audio to $publicUrl');
+      print('>>> UPLOAD: URL: $publicUrl');
       return publicUrl;
-    } catch (e) {
-      debugPrint('VoiceProvider: Error uploading audio: $e');
+    } catch (e, stack) {
+      print('>>> UPLOAD ERROR: $e');
+      print('>>> UPLOAD STACK: $stack');
       return null;
     }
   }
@@ -451,6 +524,34 @@ class VoiceProvider extends ChangeNotifier {
     return negatives.any((n) => lower == n || lower.startsWith('$n ') || lower.startsWith('$n,'));
   }
 
+  /// Check if transcription is a positive/confirm response
+  bool _isPositiveResponse(String text) {
+    final lower = text.toLowerCase().trim();
+    const positives = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'absolutely', 'definitely', 'please', 'go ahead', 'let\'s go', 'sounds good', 'yes please'];
+    return positives.any((n) => lower == n || lower.startsWith('$n ') || lower.startsWith('$n,') || lower.startsWith('$n.'));
+  }
+
+  /// Callback when user confirms report check-in - navigates to reports and starts playback
+  VoidCallback? onNavigateToReportsAndPlay;
+
+  /// Handle positive confirm of report check-in - navigate to reports and start playing
+  Future<void> _handleReportConfirm() async {
+    debugPrint('VoiceProvider: Report check-in confirmed, navigating to reports');
+
+    // Stop any ongoing pipeline activity
+    await _pipeline.stopContinuousMode();
+
+    // Clear report mode state
+    _isAwaitingReportCheckIn = false;
+    exitReportMode();
+
+    // Navigate to reports page and start playback
+    onNavigateToReportsAndPlay?.call();
+
+    // Go to paused state
+    transitionTo(VoiceState.paused);
+  }
+
   /// Handle fast decline of report check-in - exit immediately without LLM
   Future<void> _handleReportDecline() async {
     debugPrint('VoiceProvider: Fast exit from report check-in');
@@ -464,6 +565,40 @@ class VoiceProvider extends ChangeNotifier {
 
     // Go to paused state
     transitionTo(VoiceState.paused);
+  }
+
+  /// Check if transcription is a direct request for reports (no LLM needed)
+  bool _isDirectReportsRequest(String lower) {
+    // Direct requests to open/play reports
+    return lower.contains('report') && (
+           lower.contains('play') ||
+           lower.contains('start') ||
+           lower.contains('open') ||
+           lower.contains('show') ||
+           lower.contains('give me') ||
+           lower.contains('read') ||
+           lower.contains('what') ||
+           lower.contains('any') ||
+           lower.contains('update')) ||
+           lower.contains('news update') ||
+           lower.contains('news report');
+  }
+
+  /// Handle direct reports request - skip LLM, go straight to playback
+  Future<void> _handleDirectReportsRequest() async {
+    debugPrint('VoiceProvider: Handling direct reports request');
+
+    // Stop any ongoing pipeline activity immediately
+    await _pipeline.forceStopAudio();
+    await _pipeline.stopContinuousMode();
+
+    // Play brief intro
+    final introMessage = "Here's your report update.";
+    transitionTo(VoiceState.speaking);
+    await _pipeline.generateAndPlayTTS(introMessage, _pendingVoice ?? 'alloy');
+
+    // Navigate to reports page and start playing
+    onNavigateToReportsAndPlay?.call();
   }
 
   /// Update the pipeline's alternative LLM handler based on OpenClaw state
@@ -839,16 +974,29 @@ class VoiceProvider extends ChangeNotifier {
         return;
       }
 
-      // FAST EXIT: Only for the initial "Is now a good time?" check-in question
-      if (_isAwaitingReportCheckIn && _isNegativeResponse(transcription)) {
-        debugPrint('VoiceProvider: Report check-in declined, fast exit');
-        _handleReportDecline();
-        return;
+      // FAST RESPONSE: Handle report check-in yes/no without LLM
+      if (_isAwaitingReportCheckIn) {
+        if (_isPositiveResponse(transcription)) {
+          debugPrint('VoiceProvider: Report check-in confirmed, starting playback');
+          _handleReportConfirm();
+          return;
+        } else if (_isNegativeResponse(transcription)) {
+          debugPrint('VoiceProvider: Report check-in declined, fast exit');
+          _handleReportDecline();
+          return;
+        }
+        // If neither clear yes nor no, let LLM handle it
+        _isAwaitingReportCheckIn = false;
       }
 
-      // Clear the check-in flag after first response (yes or other)
-      if (_isAwaitingReportCheckIn) {
-        _isAwaitingReportCheckIn = false;
+      // DIRECT REPORTS: Check for direct report/news request - skip LLM entirely
+      final lower = transcription.toLowerCase();
+      if (_isDirectReportsRequest(lower) && onNavigateToReportsAndPlay != null) {
+        debugPrint('VoiceProvider: Direct reports request detected, skipping LLM');
+        // Abort pipeline processing SYNCHRONOUSLY before returning
+        _pipeline.abortCurrentProcessing();
+        _handleDirectReportsRequest();
+        return;
       }
 
       // Only add user message to conversation if NOT in reminder flow
@@ -869,19 +1017,19 @@ class VoiceProvider extends ChangeNotifier {
       _lastResponse = response;
 
       // Check for navigate to reports command from AI
-      if (response.contains('[OPEN_REPORTS]') && onNavigateToReports != null) {
-        debugPrint('VoiceProvider: AI requested to open reports page');
-        // Stop current audio/listening before navigating
+      if (response.contains('[OPEN_REPORTS]') && onNavigateToReportsAndPlay != null) {
+        debugPrint('VoiceProvider: AI requested to open reports page and start playing');
+        // Stop current audio/listening immediately
         await _pipeline.forceStopAudio();
-        await _pipeline.pauseContinuousMode();
-        // Navigate to reports page
-        onNavigateToReports!();
-        // Wait for navigation to complete, then trigger check-in
-        await Future.delayed(const Duration(milliseconds: 500));
-        // Only trigger check-in if not paused by user
-        if (_state != VoiceState.paused) {
-          await triggerReportCheckIn(skipIntro: true);
-        }
+        await _pipeline.stopContinuousMode();
+
+        // Play brief intro, then navigate and start playing
+        final introMessage = "Here's your report update.";
+        transitionTo(VoiceState.speaking);
+        await _pipeline.generateAndPlayTTS(introMessage, _pendingVoice ?? 'alloy');
+
+        // Navigate to reports page and start playing
+        onNavigateToReportsAndPlay!();
         return;
       }
 
@@ -1468,11 +1616,12 @@ class VoiceProvider extends ChangeNotifier {
   }
   
   /// Stop transcription recording and get transcribed text
-  Future<String?> stopAndTranscribe() async {
+  /// If [language] is null, Whisper auto-detects (for multilingual translator)
+  Future<String?> stopAndTranscribe({String? language = 'en'}) async {
     final audioPath = await _pipeline.stopTranscriptionRecording();
     if (audioPath == null) return null;
-    
-    final transcription = await _pipeline.transcribeAudio(audioPath);
+
+    final transcription = await _pipeline.transcribeAudio(audioPath, language: language);
     return transcription;
   }
   

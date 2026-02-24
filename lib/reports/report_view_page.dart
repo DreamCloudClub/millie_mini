@@ -13,10 +13,9 @@ class ReportViewPage extends StatefulWidget {
   final Report report;
   final Function(Report) onReportUpdated;
   final VoidCallback onReportDeleted;
-  final VoidCallback onPause;
-  final VoidCallback onPlay;
   final VoidCallback onRefresh;
   final VoidCallback onExit;
+  final void Function(BuildContext)? onSkip;
   final bool autoPlay;
 
   const ReportViewPage({
@@ -24,10 +23,9 @@ class ReportViewPage extends StatefulWidget {
     required this.report,
     required this.onReportUpdated,
     required this.onReportDeleted,
-    required this.onPause,
-    required this.onPlay,
     required this.onRefresh,
     required this.onExit,
+    this.onSkip,
     this.autoPlay = false,
   });
 
@@ -137,6 +135,27 @@ class _ReportViewPageState extends State<ReportViewPage> {
   Future<void> _readAloud() async {
     final voiceProvider = context.read<VoiceProvider>();
     await voiceProvider.readReport(_currentReport);
+  }
+
+  Future<void> _pauseAudio() async {
+    final voiceProvider = context.read<VoiceProvider>();
+    await voiceProvider.pauseReportAudio();
+  }
+
+  Future<void> _resumeAudio() async {
+    final voiceProvider = context.read<VoiceProvider>();
+    // If audio was paused mid-playback, resume it
+    // Otherwise start playing from beginning
+    if (voiceProvider.isReportAudioPaused) {
+      await voiceProvider.resumeReportAudio();
+    } else {
+      await voiceProvider.readReport(_currentReport);
+    }
+  }
+
+  Future<void> _restartAudio() async {
+    final voiceProvider = context.read<VoiceProvider>();
+    await voiceProvider.restartReportAudio();
   }
 
   Future<void> _openSourceUrl() async {
@@ -259,7 +278,8 @@ class _ReportViewPageState extends State<ReportViewPage> {
       await reportsProvider.deleteReport(_currentReport.id);
       widget.onReportDeleted();
       if (mounted) {
-        Navigator.pop(context);
+        // Pop all stacked report views back to the reports list
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     }
   }
@@ -294,11 +314,14 @@ class _ReportViewPageState extends State<ReportViewPage> {
                         ),
                       ),
                     ),
-                    // Back button (left)
+                    // Back button (left) - pops all report views back to list
                     Positioned(
                       left: 0,
                       child: GestureDetector(
-                        onTap: () => Navigator.pop(context),
+                        onTap: () {
+                          // Pop all stacked report views back to the reports list
+                          Navigator.of(context).popUntil((route) => route.isFirst);
+                        },
                         child: Container(
                           width: 44,
                           height: 44,
@@ -396,13 +419,15 @@ class _ReportViewPageState extends State<ReportViewPage> {
                                 _currentReport.imageUrl!.isNotEmpty) ...[
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: Image.network(
-                                  _currentReport.imageUrl!,
-                                  height: 200,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const SizedBox.shrink(),
+                                child: AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: Image.network(
+                                    _currentReport.imageUrl!,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) =>
+                                        const SizedBox.shrink(),
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: AppSpacing.lg),
@@ -442,7 +467,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
                                     : _currentReport.title,
                                 style: TextStyle(
                                   fontFamily: AppTextStyles.fontFamily,
-                                  fontSize: isLarge ? 28 : 24,
+                                  fontSize: isLarge ? 32 : 28,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
                                 ),
@@ -527,7 +552,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
                                 _currentReport.summary,
                                 style: TextStyle(
                                   fontFamily: AppTextStyles.fontFamily,
-                                  fontSize: isLarge ? 22 : 18,
+                                  fontSize: isLarge ? 26 : 22,
                                   fontWeight: FontWeight.w500,
                                   color: Colors.white.withOpacity(0.9),
                                   fontStyle: FontStyle.italic,
@@ -549,7 +574,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
                                   : _currentReport.content,
                               style: TextStyle(
                                 fontFamily: AppTextStyles.fontFamily,
-                                fontSize: isLarge ? 22 : 18,
+                                fontSize: isLarge ? 26 : 22,
                                 color: _currentReport.content.isEmpty
                                     ? Colors.white.withOpacity(0.3)
                                     : Colors.white.withOpacity(0.9),
@@ -616,12 +641,13 @@ class _ReportViewPageState extends State<ReportViewPage> {
               ),
             ),
 
-            // Bottom control bar - Play reads this report
+            // Bottom control bar - Pause/Resume audio, Restart, Skip to next
             ControlBar(
-              onPause: widget.onPause,
-              onPlay: _readAloud,
-              onRefresh: widget.onRefresh,
+              onPause: _pauseAudio,
+              onPlay: _resumeAudio,
+              onRefresh: _restartAudio,
               onExit: widget.onExit,
+              onSkip: widget.onSkip != null ? () => widget.onSkip!(context) : null,
             ),
           ],
         ),

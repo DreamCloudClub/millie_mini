@@ -24,7 +24,6 @@ class ScheduleEditPage extends StatefulWidget {
 }
 
 class _ScheduleEditPageState extends State<ScheduleEditPage> {
-  late List<String> _selectedCategories;  // Empty = all categories
   late int _startTimeMinutes;
   late int _endTimeMinutes;
   late List<int> _daysOfWeek;
@@ -39,14 +38,12 @@ class _ScheduleEditPageState extends State<ScheduleEditPage> {
     super.initState();
 
     if (isEditing) {
-      _selectedCategories = List.from(widget.schedule!.categories);
       _startTimeMinutes = widget.schedule!.startTimeMinutes;
       _endTimeMinutes = widget.schedule!.endTimeMinutes;
       _daysOfWeek = List.from(widget.schedule!.daysOfWeek);
       _frequency = widget.schedule!.frequency;
       _enabled = widget.schedule!.enabled;
     } else {
-      _selectedCategories = [];  // Empty = all categories
       _startTimeMinutes = 540; // 9:00 AM
       _endTimeMinutes = 1260; // 9:00 PM
       _daysOfWeek = [1, 2, 3, 4, 5, 6, 7]; // Every day
@@ -117,7 +114,7 @@ class _ScheduleEditPageState extends State<ScheduleEditPage> {
 
       if (isEditing) {
         final updated = widget.schedule!.copyWith(
-          categories: _selectedCategories,
+          categories: [], // Always empty = all categories
           startTimeMinutes: _startTimeMinutes,
           endTimeMinutes: _endTimeMinutes,
           daysOfWeek: _daysOfWeek,
@@ -128,7 +125,7 @@ class _ScheduleEditPageState extends State<ScheduleEditPage> {
       } else {
         final schedule = CategorySchedule.create(
           userId: userId,
-          categories: _selectedCategories,
+          categories: [], // Always empty = all categories
           startTimeMinutes: _startTimeMinutes,
           endTimeMinutes: _endTimeMinutes,
           daysOfWeek: _daysOfWeek,
@@ -244,13 +241,6 @@ class _ScheduleEditPageState extends State<ScheduleEditPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Category selector
-                  _buildCategorySelector(),
-
-                  const SizedBox(height: AppSpacing.lg),
-                  const Divider(),
-                  const SizedBox(height: AppSpacing.lg),
-
                   // Time range
                   const Text(
                     'Time Window',
@@ -348,144 +338,6 @@ class _ScheduleEditPageState extends State<ScheduleEditPage> {
           ],
         ),
       ),
-    );
-  }
-
-  String _capitalize(String s) {
-    if (s.isEmpty) return s;
-    return s[0].toUpperCase() + s.substring(1).toLowerCase();
-  }
-
-  void _toggleCategory(String category) {
-    setState(() {
-      if (_selectedCategories.contains(category)) {
-        _selectedCategories.remove(category);
-      } else {
-        _selectedCategories.add(category);
-        _selectedCategories.sort();
-      }
-    });
-  }
-
-  void _selectAllCategories() {
-    setState(() {
-      _selectedCategories.clear();
-    });
-  }
-
-  Widget _buildCategorySelector() {
-    return Consumer<ReportsProvider>(
-      builder: (context, provider, _) {
-        // Get user's enabled watchlist categories (main categories only)
-        final enabledCategorySet = provider.enabledWatchlist
-            .where((w) => w.subcategory == null)
-            .map((w) => w.category)
-            .toSet();
-
-        // Order them according to the Report Categories list (groupedCategories order)
-        final watchlistCategories = provider.groupedCategories.keys
-            .where((cat) => enabledCategorySet.contains(cat))
-            .toList();
-
-        final isAllSelected = _selectedCategories.isEmpty;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Categories',
-              style: TextStyle(
-                fontFamily: AppTextStyles.fontFamily,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textLight,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-
-            if (watchlistCategories.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: AppColors.textLight, size: 20),
-                    const SizedBox(width: AppSpacing.sm),
-                    const Expanded(
-                      child: Text(
-                        'No categories selected. Add categories in Report Categories above.',
-                        style: AppTextStyles.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  // "All" chip
-                  GestureDetector(
-                    onTap: _selectAllCategories,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                        vertical: AppSpacing.sm,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isAllSelected
-                            ? AppColors.dreamCloudBlue
-                            : Colors.grey.shade200,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        'All',
-                        style: TextStyle(
-                          fontFamily: AppTextStyles.fontFamily,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: isAllSelected ? Colors.white : AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Individual category chips
-                  ...watchlistCategories.map((category) {
-                    final isSelected = _selectedCategories.contains(category);
-                    return GestureDetector(
-                      onTap: () => _toggleCategory(category),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.md,
-                          vertical: AppSpacing.sm,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? AppColors.dreamCloudBlue
-                              : Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          _capitalize(category),
-                          style: TextStyle(
-                            fontFamily: AppTextStyles.fontFamily,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: isSelected ? Colors.white : AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ],
-              ),
-          ],
-        );
-      },
     );
   }
 

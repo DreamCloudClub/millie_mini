@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../providers/reports_provider.dart';
+import '../providers/voice_provider.dart';
 import '../utils/constants.dart';
 
 /// Report card widget - horizontal layout with image on left
@@ -12,8 +13,8 @@ class ReportCard extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback? onDelete;
   final VoidCallback? onSave;
-  final VoidCallback? onRead;
-  final VoidCallback? onSkip;
+  final VoidCallback? onPlay;
+  final VoidCallback? onPause;
 
   const ReportCard({
     super.key,
@@ -22,8 +23,8 @@ class ReportCard extends StatelessWidget {
     required this.onOpen,
     this.onDelete,
     this.onSave,
-    this.onRead,
-    this.onSkip,
+    this.onPlay,
+    this.onPause,
   });
 
   String _formatRelativeTime(DateTime date) {
@@ -113,18 +114,20 @@ class ReportCard extends StatelessWidget {
     // Calculate square image size (1/3 of screen width)
     final imageSize = MediaQuery.of(context).size.width * 0.33;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.md),
-      height: imageSize, // Card height matches image for square
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: categoryColor.withOpacity(0.6),
-          width: 1,
+    return GestureDetector(
+      onTap: onOpen,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: AppSpacing.md),
+        height: imageSize, // Card height matches image for square
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: categoryColor.withOpacity(0.6),
+            width: 1,
+          ),
         ),
-      ),
-      child: Row(
+        child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Left: Square image
@@ -208,7 +211,7 @@ class ReportCard extends StatelessWidget {
                       report.title.isEmpty ? 'Untitled Report' : report.title,
                       style: TextStyle(
                         fontFamily: AppTextStyles.fontFamily,
-                        fontSize: isLarge ? 19 : 15,
+                        fontSize: isLarge ? 23 : 19,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
@@ -225,7 +228,7 @@ class ReportCard extends StatelessWidget {
                           report.summary,
                           style: TextStyle(
                             fontFamily: AppTextStyles.fontFamily,
-                            fontSize: isLarge ? 17 : 13,
+                            fontSize: isLarge ? 21 : 17,
                             color: Colors.white.withOpacity(0.7),
                             height: 1.3,
                           ),
@@ -274,80 +277,43 @@ class ReportCard extends StatelessWidget {
 
                         const Spacer(),
 
-                        // Play button (bright green)
-                        if (onRead != null) ...[
-                          GestureDetector(
-                            onTap: onRead,
-                            child: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: const BoxDecoration(
-                                color: Colors.green,
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: const Icon(
-                                Icons.play_arrow,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                            ),
+                        // Play/Pause button (blue)
+                        if (onPlay != null) ...[
+                          Consumer<VoiceProvider>(
+                            builder: (context, voiceProvider, _) {
+                              final isThisPlaying = voiceProvider.currentPlayingReportId == report.id;
+                              final isPaused = voiceProvider.isReportAudioPaused;
+                              final showPause = isThisPlaying && !isPaused;
+
+                              return GestureDetector(
+                                onTap: showPause ? onPause : onPlay,
+                                child: Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.blue,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Icon(
+                                    showPause ? Icons.pause : Icons.play_arrow,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                           const SizedBox(width: AppSpacing.sm),
                         ],
-
-                        // Skip button (bright orange)
-                        if (onSkip != null) ...[
-                          GestureDetector(
-                            onTap: onSkip,
-                            child: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: const BoxDecoration(
-                                color: AppColors.primaryOrange,
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: const Icon(
-                                Icons.skip_next,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                        ],
-
-                        // Open button (blue)
-                        ElevatedButton(
-                          onPressed: onOpen,
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.blue,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.md,
-                              vertical: 6,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            minimumSize: const Size(50, 28),
-                            elevation: 0,
-                          ),
-                          child: const Text(
-                            'Open',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
 
                         // Save button (green with white icon)
                         if (onSave != null) ...[
                           GestureDetector(
                             onTap: onSave,
                             child: Container(
-                              width: 32,
-                              height: 32,
+                              width: 40,
+                              height: 40,
                               decoration: const BoxDecoration(
                                 color: Colors.green,
                                 shape: BoxShape.circle,
@@ -356,7 +322,7 @@ class ReportCard extends StatelessWidget {
                               child: Icon(
                                 isSaved ? Icons.bookmark : Icons.bookmark_outline,
                                 color: Colors.white,
-                                size: 18,
+                                size: 22,
                               ),
                             ),
                           ),
@@ -368,8 +334,8 @@ class ReportCard extends StatelessWidget {
                           GestureDetector(
                             onTap: onDelete,
                             child: Container(
-                              width: 32,
-                              height: 32,
+                              width: 40,
+                              height: 40,
                               decoration: const BoxDecoration(
                                 color: AppColors.primaryOrange,
                                 shape: BoxShape.circle,
@@ -378,7 +344,7 @@ class ReportCard extends StatelessWidget {
                               child: const Icon(
                                 Icons.delete,
                                 color: Colors.white,
-                                size: 18,
+                                size: 22,
                               ),
                             ),
                           ),
@@ -390,6 +356,7 @@ class ReportCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
     );
   }
 }
