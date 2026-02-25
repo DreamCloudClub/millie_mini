@@ -15,6 +15,8 @@ import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
 import '../services/foods_service.dart';
 import '../services/geography_service.dart';
+import '../services/stories_service.dart';
+import '../models/story_page.dart';
 import '../providers/custom_quiz_provider.dart';
 
 /// Callback type for TTS playback
@@ -69,6 +71,10 @@ class GameController extends ChangeNotifier {
 
   /// Reference to CustomQuizProvider for resolving custom quiz categories
   CustomQuizProvider? _customQuizProvider;
+
+  /// Story mode state
+  List<StoryPage>? _storyPages;
+  int _storyPageIndex = 0;
 
   /// Callbacks for TTS and mic control (wired from VoiceProvider/Pipeline)
   TTSCallback? onPlayTTS;
@@ -616,6 +622,15 @@ class GameController extends ChangeNotifier {
     }
 
     if (item == null) {
+      // For stories, end silently (no "no more questions" message)
+      if (_state.isStoryMode) {
+        debugPrint('GameController: Story complete, ending silently');
+        if (!_isExiting && _sessionId == currentSession) {
+          _forceTransitionToIdle();
+        }
+        return;
+      }
+
       debugPrint('GameController: No more questions available');
       // Play "no more questions" message and exit
       _state = _state.copyWith(phase: LessonPhase.feedback);
@@ -667,6 +682,24 @@ class GameController extends ChangeNotifier {
         debugPrint('GameController: Playing audio for ${item.answer}');
         await onPlayAudioFile!(audioPath);
         return; // onTTSFinished will be called when playback completes
+      }
+    }
+
+    // Check for cached audio (stories) - will generate and cache if not found
+    if (_state.isStoryMode && onPlayAudioFile != null && _storyPages != null) {
+      // Find the current page (index was already incremented, so subtract 1)
+      final pageIndex = _storyPageIndex - 1;
+      if (pageIndex >= 0 && pageIndex < _storyPages!.length) {
+        final page = _storyPages![pageIndex];
+        final audioPath = await StoriesService.getAudioPath(
+          page: page,
+          voice: _ttsVoice,
+        );
+        if (audioPath != null) {
+          debugPrint('GameController: Playing story audio for page ${page.pageNumber}');
+          await onPlayAudioFile!(audioPath);
+          return; // onTTSFinished will be called when playback completes
+        }
       }
     }
 
@@ -823,6 +856,11 @@ class GameController extends ChangeNotifier {
     // True/False uses true_false_questions table
     if (category == 'truefalse' || category == 'true false' || category == 'true or false') {
       return _getNextTrueFalseQuestion();
+    }
+
+    // Stories use story_pages table
+    if (category.startsWith('story:')) {
+      return _getNextStoryPage();
     }
 
     // Fallback to hardcoded items for unknown categories
@@ -1276,6 +1314,47 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  /// Get next story page (auto-play through story)
+  Future<LessonItem?> _getNextStoryPage() async {
+    final category = _state.category;
+    final storyId = category.replaceFirst('story:', '');
+
+    // Load story pages if not loaded
+    if (_storyPages == null || _storyPages!.isEmpty || _storyPages!.first.storyId != storyId) {
+      _storyPages = await StoriesService.getStoryPages(storyId);
+      _storyPageIndex = 0;
+      debugPrint('GameController: Loaded ${_storyPages?.length ?? 0} pages for story $storyId');
+    }
+
+    if (_storyPages == null || _storyPages!.isEmpty) {
+      debugPrint('GameController: No pages found for story $storyId');
+      return null;
+    }
+
+    // Check if we've reached the end
+    if (_storyPageIndex >= _storyPages!.length) {
+      debugPrint('GameController: Story complete');
+      _storyPages = null;
+      _storyPageIndex = 0;
+      return null; // End of story
+    }
+
+    final page = _storyPages![_storyPageIndex];
+    _storyPageIndex++;
+
+    debugPrint('GameController: Story page ${page.pageNumber} of ${_storyPages!.length}');
+
+    return LessonItem(
+      id: page.id,
+      type: 'story',
+      prompt: page.text,
+      answer: page.title, // Store title in answer field for display
+      aliases: [],
+      gradingType: GradingType.none, // Auto-advance
+      imageUrl: page.imageUrl,
+    );
+  }
+
   /// Get next item from a custom quiz (randomly picks from its categories)
   /// Shuffles categories and tries each until one returns an item
   Future<LessonItem?> _getNextFromCustomQuiz(String quizId) async {
@@ -1405,6 +1484,10 @@ class GameController extends ChangeNotifier {
       case 'geography:random':
         return "Let's explore U.S. geography! Sometimes I'll quiz you, and sometimes I'll teach you something new.";
       default:
+        // Handle story categories
+        if (category.startsWith('story:')) {
+          return "Story time! Get cozy and listen to this tale.";
+        }
         return "Let's play! I'll ask you some questions.";
     }
   }

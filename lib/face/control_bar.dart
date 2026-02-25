@@ -123,11 +123,11 @@ class ControlBar extends StatelessWidget {
                     buttonColor: Colors.blue,
                   )
               else if (onStart != null)
-                // On game page but no category selected - show Play (not Wake)
+                // On game page but no category selected - show Play (inactive)
                 _ControlButton(
                   icon: Icons.play_arrow,
                   label: 'Play',
-                  onTap: onPlay,
+                  onTap: () {},
                   buttonColor: Colors.blue,
                 )
               else
@@ -147,21 +147,13 @@ class ControlBar extends StatelessWidget {
                     buttonColor: Colors.blue,
                   ),
 
-              // Skip button (when available) or Exit button
-              if (onSkip != null && !isGameRunning)
-                _ControlButton(
-                  icon: Icons.skip_next,
-                  label: 'Skip',
-                  onTap: onSkip!,
-                  buttonColor: AppColors.primaryOrange,
-                )
-              else
-                _ControlButton(
-                  icon: Icons.close,
-                  label: 'Exit',
-                  onTap: onExit,
-                  buttonColor: AppColors.primaryOrange,
-                ),
+              // Exit button (right side)
+              _ControlButton(
+                icon: Icons.close,
+                label: 'Exit',
+                onTap: onExit,
+                buttonColor: AppColors.primaryOrange,
+              ),
             ],
           ),
         );

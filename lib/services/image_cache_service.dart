@@ -7,23 +7,27 @@ import 'package:crypto/crypto.dart';
 import 'supabase_service.dart';
 import 'face_image_service.dart';
 
-/// Service for caching animal, face, and food images locally
+/// Service for caching animal, face, food, and story images locally
 class ImageCacheService {
   static const String _cacheDir = 'animal_images';
   static const String _faceCacheDir = 'face_images';
   static const String _foodCacheDir = 'food_images';
+  static const String _storyCacheDir = 'story_images';
   static const String _manifestFile = 'manifest.json';
 
   static Directory? _cacheDirectory;
   static Directory? _faceCacheDirectory;
   static Directory? _foodCacheDirectory;
+  static Directory? _storyCacheDirectory;
   static Map<String, String> _manifest = {}; // url -> local filename
   static Map<String, String> _faceManifest = {}; // url -> local filename for faces
   static Map<String, String> _foodManifest = {}; // url -> local filename for foods
+  static Map<String, String> _storyManifest = {}; // url -> local filename for stories
   static bool _isInitialized = false;
   static bool _isSyncing = false;
   static bool _isSyncingFaces = false;
   static bool _isSyncingFoods = false;
+  static bool _isSyncingStories = false;
 
   /// Initialize the cache directory and load manifest
   static Future<void> init() async {
@@ -34,6 +38,7 @@ class ImageCacheService {
       _cacheDirectory = Directory('${appDir.path}/$_cacheDir');
       _faceCacheDirectory = Directory('${appDir.path}/$_faceCacheDir');
       _foodCacheDirectory = Directory('${appDir.path}/$_foodCacheDir');
+      _storyCacheDirectory = Directory('${appDir.path}/$_storyCacheDir');
 
       if (!await _cacheDirectory!.exists()) {
         await _cacheDirectory!.create(recursive: true);
@@ -44,12 +49,16 @@ class ImageCacheService {
       if (!await _foodCacheDirectory!.exists()) {
         await _foodCacheDirectory!.create(recursive: true);
       }
+      if (!await _storyCacheDirectory!.exists()) {
+        await _storyCacheDirectory!.create(recursive: true);
+      }
 
       await _loadManifest();
       await _loadFaceManifest();
       await _loadFoodManifest();
+      await _loadStoryManifest();
       _isInitialized = true;
-      debugPrint('ImageCacheService: Initialized with ${_manifest.length} animal, ${_faceManifest.length} face, ${_foodManifest.length} food images');
+      debugPrint('ImageCacheService: Initialized with ${_manifest.length} animal, ${_faceManifest.length} face, ${_foodManifest.length} food, ${_storyManifest.length} story images');
     } catch (e) {
       debugPrint('ImageCacheService: Error initializing: $e');
     }
@@ -454,6 +463,128 @@ class ImageCacheService {
       return totalSize;
     } catch (e) {
       return 0;
+    }
+  }
+
+  /// Load the story manifest file
+  static Future<void> _loadStoryManifest() async {
+    try {
+      final manifestPath = '${_storyCacheDirectory!.path}/$_manifestFile';
+      final file = File(manifestPath);
+
+      if (await file.exists()) {
+        final contents = await file.readAsString();
+        final decoded = json.decode(contents) as Map<String, dynamic>;
+        _storyManifest = decoded.map((k, v) => MapEntry(k, v as String));
+      }
+    } catch (e) {
+      debugPrint('ImageCacheService: Error loading story manifest: $e');
+      _storyManifest = {};
+    }
+  }
+
+  /// Save the story manifest file
+  static Future<void> _saveStoryManifest() async {
+    try {
+      final manifestPath = '${_storyCacheDirectory!.path}/$_manifestFile';
+      final file = File(manifestPath);
+      await file.writeAsString(json.encode(_storyManifest));
+    } catch (e) {
+      debugPrint('ImageCacheService: Error saving story manifest: $e');
+    }
+  }
+
+  /// Get local path for a story image URL (returns null if not cached)
+  static String? getStoryLocalPath(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (!_isInitialized) return null;
+
+    final filename = _storyManifest[url];
+    if (filename == null) return null;
+
+    final path = '${_storyCacheDirectory!.path}/$filename';
+    return path;
+  }
+
+  /// Check if a story image is cached
+  static bool isStoryCached(String? url) {
+    if (url == null || url.isEmpty) return false;
+    return _storyManifest.containsKey(url);
+  }
+
+  /// Sync all story images from database
+  /// Runs in background, doesn't block UI
+  static Future<void> syncStoryImages() async {
+    if (_isSyncingStories) {
+      debugPrint('ImageCacheService: Story sync already in progress');
+      return;
+    }
+
+    if (!_isInitialized) {
+      await init();
+    }
+
+    _isSyncingStories = true;
+    debugPrint('ImageCacheService: Starting story image sync...');
+
+    try {
+      // Fetch all story image URLs from database
+      final response = await SupabaseConfig.client
+          .from('story_pages')
+          .select('id, image_url');
+
+      final pages = response as List;
+      int downloaded = 0;
+      int skipped = 0;
+
+      for (final page in pages) {
+        final imageUrl = page['image_url'] as String?;
+        if (imageUrl == null || imageUrl.isEmpty) continue;
+
+        // Check if already cached
+        if (_storyManifest.containsKey(imageUrl)) {
+          final localPath = '${_storyCacheDirectory!.path}/${_storyManifest[imageUrl]}';
+          if (await File(localPath).exists()) {
+            skipped++;
+            continue;
+          }
+        }
+
+        // Download and cache
+        final success = await _downloadStoryImage(imageUrl);
+        if (success) {
+          downloaded++;
+        }
+      }
+
+      await _saveStoryManifest();
+      debugPrint('ImageCacheService: Story sync complete - downloaded: $downloaded, skipped: $skipped');
+    } catch (e) {
+      debugPrint('ImageCacheService: Error syncing stories: $e');
+    } finally {
+      _isSyncingStories = false;
+    }
+  }
+
+  /// Download a story image and cache it
+  static Future<bool> _downloadStoryImage(String url) async {
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        debugPrint('ImageCacheService: Failed to download story $url (${response.statusCode})');
+        return false;
+      }
+
+      final filename = _getFilename(url);
+      final localPath = '${_storyCacheDirectory!.path}/$filename';
+      final file = File(localPath);
+      await file.writeAsBytes(response.bodyBytes);
+
+      _storyManifest[url] = filename;
+      return true;
+    } catch (e) {
+      debugPrint('ImageCacheService: Error downloading story $url: $e');
+      return false;
     }
   }
 }

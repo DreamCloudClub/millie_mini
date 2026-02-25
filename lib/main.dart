@@ -221,10 +221,11 @@ class _AppNavigatorState extends State<AppNavigator> {
 
       debugPrint('Reminder scheduler started');
 
-      // Sync animal, face, and food images in background (don't await - non-blocking)
+      // Sync animal, face, food, and story images in background (don't await - non-blocking)
       ImageCacheService.syncAnimalImages();
       ImageCacheService.syncFaceImages();
       ImageCacheService.syncFoodImages();
+      ImageCacheService.syncStoryImages();
     }
     
     if (mounted) {

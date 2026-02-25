@@ -127,6 +127,9 @@ class LessonState {
   /// Whether current question is foods mode (quiz or lesson)
   bool get isFoodsMode => currentItem?.type == 'foods' || currentItem?.type == 'foods:lesson' || category.startsWith('foods');
 
+  /// Whether current mode is story mode
+  bool get isStoryMode => currentItem?.type == 'story' || category.startsWith('story:');
+
   /// Whether current question is geography mode (quiz or lesson)
   bool get isGeographyMode => currentItem?.type == 'geography' || currentItem?.type == 'geography:lesson' || category.startsWith('geography');
 

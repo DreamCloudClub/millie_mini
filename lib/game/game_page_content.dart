@@ -10,6 +10,8 @@ import '../services/shapes_service.dart';
 import '../services/animals_service.dart';
 import '../services/foods_service.dart';
 import '../services/image_cache_service.dart';
+import '../services/stories_service.dart';
+import '../models/story_page.dart';
 import '../geography/us_states_map_widget.dart';
 import 'lesson_phase.dart';
 
@@ -62,8 +64,14 @@ class _GamePageContentState extends State<GamePageContent> {
   bool _showFoodsMenu = false;
   bool _showGeographyMenu = false;
 
+  /// Stories menu
+  bool _showStoriesMenu = false;
+
   /// Track if game was running in previous frame (to detect game end)
   bool _wasGameRunning = false;
+
+  /// Track last category (to know where to return after game ends)
+  String _lastCategory = '';
 
   @override
   void initState() {
@@ -95,14 +103,29 @@ class _GamePageContentState extends State<GamePageContent> {
 
             // Reset submenus when returning from a game
             final isGameRunning = lessonState.isGameRunning;
+
+            // Track the category while game is running (before it gets cleared)
+            if (isGameRunning && lessonState.category.isNotEmpty) {
+              _lastCategory = lessonState.category;
+            }
+
+            final wasStoryMode = _lastCategory.startsWith('story:');
             final anyMenuOpen = _showBrainGamesMenu || _showLearningMenu ||
                 _showMathCategoryMenu || _showLanguageMenu || _showScienceMenu ||
-                _showMathMenu || _showLettersMenu || _showAnimalsMenu || _showFoodsMenu || _showGeographyMenu;
+                _showMathMenu || _showLettersMenu || _showAnimalsMenu || _showFoodsMenu || _showGeographyMenu || _showStoriesMenu;
             if (_wasGameRunning && !isGameRunning && anyMenuOpen) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) setState(() {
-                  _showBrainGamesMenu = false;
-                  _showLearningMenu = false;
+                  // For stories, go back to stories menu instead of main menu
+                  if (wasStoryMode) {
+                    _showBrainGamesMenu = true;
+                    _showStoriesMenu = true;
+                    _showLearningMenu = false;
+                  } else {
+                    _showBrainGamesMenu = false;
+                    _showStoriesMenu = false;
+                    _showLearningMenu = false;
+                  }
                   _showMathCategoryMenu = false;
                   _showLanguageMenu = false;
                   _showScienceMenu = false;
@@ -111,6 +134,8 @@ class _GamePageContentState extends State<GamePageContent> {
                   _showAnimalsMenu = false;
                   _showFoodsMenu = false;
                   _showGeographyMenu = false;
+                  // Clear last category after using it
+                  _lastCategory = '';
                 });
               });
             }
@@ -141,6 +166,7 @@ class _GamePageContentState extends State<GamePageContent> {
                               _showAnimalsMenu = false;
                               _showFoodsMenu = false;
                               _showGeographyMenu = false;
+                              _showStoriesMenu = false;
                             });
                             return;
                           }
@@ -161,6 +187,9 @@ class _GamePageContentState extends State<GamePageContent> {
                           } else if (_showGeographyMenu) {
                             // Geography options → Learning menu
                             setState(() => _showGeographyMenu = false);
+                          } else if (_showStoriesMenu) {
+                            // Stories menu → Brain Games menu
+                            setState(() => _showStoriesMenu = false);
                           } else if (_showMathCategoryMenu || _showLanguageMenu || _showScienceMenu) {
                             // Category menus → Learning menu
                             setState(() {
@@ -360,6 +389,10 @@ class _GamePageContentState extends State<GamePageContent> {
 
     // Show Brain Games submenu
     if (_showBrainGamesMenu) {
+      // Check for Stories submenu
+      if (_showStoriesMenu) {
+        return _buildStoriesSubMenu(context, voiceProvider, selectedCategory);
+      }
       return _buildBrainGamesSubMenu(context, voiceProvider, selectedCategory);
     }
 
@@ -511,8 +544,62 @@ class _GamePageContentState extends State<GamePageContent> {
             ),
 
             const SizedBox(height: AppSpacing.lg),
+
+            _MainMenuCard(
+              icon: Icons.auto_stories,
+              title: 'Stories',
+              subtitle: 'Bedtime tales',
+              description: 'Listen to enchanting stories with beautiful pictures. Perfect for winding down!',
+              isSelected: selectedCategory == 'stories',
+              onTap: () => setState(() => _showStoriesMenu = true),
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildStoriesSubMenu(BuildContext context, VoiceProvider voiceProvider, String? selectedCategory) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: FutureBuilder<List<StorySummary>>(
+        future: StoriesService.getStoryList(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final stories = snapshot.data ?? [];
+
+          if (stories.isEmpty) {
+            return const Center(
+              child: Text(
+                'No stories available yet',
+                style: TextStyle(color: Colors.white70, fontSize: 16),
+              ),
+            );
+          }
+
+          return SingleChildScrollView(
+            child: Column(
+              children: [
+                for (final story in stories) ...[
+                  _MainMenuCard(
+                    icon: Icons.auto_stories,
+                    title: story.title,
+                    subtitle: '${story.pageCount} pages',
+                    description: 'Tap to start listening to this story!',
+                    isSelected: selectedCategory == 'story:${story.storyId}',
+                    onTap: () => voiceProvider.selectLessonCategory('story:${story.storyId}'),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -965,6 +1052,8 @@ class _GamePageContentState extends State<GamePageContent> {
       return _buildGeographyLessonDisplay(context, lessonState);
     } else if (lessonState.isGeographyMode) {
       return _buildGeographyQuizDisplay(context, lessonState, remainingSeconds);
+    } else if (lessonState.isStoryMode) {
+      return _buildStoryDisplay(context, lessonState);
     } else {
       return _buildDefaultDisplay(context, lessonState, remainingSeconds);
     }
@@ -1041,6 +1130,10 @@ class _GamePageContentState extends State<GamePageContent> {
       case 'geography:random':
         return ("Let's explore U.S. geography!", "Sometimes I'll quiz you, sometimes I'll teach you.");
       default:
+        // Handle story categories
+        if (category.startsWith('story:')) {
+          return ("Story Time!", "Get cozy and listen to this tale.");
+        }
         return ("Let's play!", "I'll ask you some questions.");
     }
   }
@@ -1438,6 +1531,106 @@ class _GamePageContentState extends State<GamePageContent> {
           ),
         );
       },
+    );
+  }
+
+  /// Story display - title at top, image, text below
+  Widget _buildStoryDisplay(BuildContext context, LessonState lessonState) {
+    final text = lessonState.displayQuestion;
+    final title = lessonState.displayAnswer; // Title stored in answer field
+    final imageUrl = lessonState.currentItem?.imageUrl;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Story title at top
+          if (title.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.md),
+              child: Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: AppTextStyles.fontFamily,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+
+          // Image - centered
+          Center(
+            child: FractionallySizedBox(
+              widthFactor: 0.85,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildStoryImage(imageUrl),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.xl),
+
+          // Story text below image
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 20,
+              color: Colors.white.withOpacity(0.9),
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build story image from URL (with local caching)
+  Widget _buildStoryImage(String? imageUrl) {
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return Container(
+        height: 200,
+        color: Colors.grey[800],
+        child: const Icon(Icons.auto_stories, size: 64, color: Colors.white54),
+      );
+    }
+
+    // Check for local cached version
+    final localPath = ImageCacheService.getStoryLocalPath(imageUrl);
+    if (localPath != null) {
+      return Image.file(
+        File(localPath),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _buildNetworkStoryImage(imageUrl),
+      );
+    }
+
+    return _buildNetworkStoryImage(imageUrl);
+  }
+
+  /// Build network image for story
+  Widget _buildNetworkStoryImage(String imageUrl) {
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        return Container(
+          height: 200,
+          color: Colors.grey[800],
+          child: const Center(child: CircularProgressIndicator()),
+        );
+      },
+      errorBuilder: (_, __, ___) => Container(
+        height: 200,
+        color: Colors.grey[800],
+        child: const Icon(Icons.broken_image, size: 64, color: Colors.white54),
+      ),
     );
   }
 
