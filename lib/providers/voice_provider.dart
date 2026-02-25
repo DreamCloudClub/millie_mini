@@ -579,6 +579,7 @@ class VoiceProvider extends ChangeNotifier {
            lower.contains('read') ||
            lower.contains('what') ||
            lower.contains('any') ||
+           lower.contains('check') ||
            lower.contains('update')) ||
            lower.contains('news update') ||
            lower.contains('news report');
@@ -597,7 +598,10 @@ class VoiceProvider extends ChangeNotifier {
     transitionTo(VoiceState.speaking);
     await _pipeline.generateAndPlayTTS(introMessage, _pendingVoice ?? 'alloy');
 
-    // Navigate to reports page and start playing
+    // Transition to paused to stop the AI conversation
+    transitionTo(VoiceState.paused);
+
+    // Navigate to reports page and start playing first report
     onNavigateToReportsAndPlay?.call();
   }
 
