@@ -444,10 +444,6 @@ class ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientM
   /// Skip to next report from the current one (used in report view)
   void _skipToNextReportFrom(Report currentReport, BuildContext reportViewContext) async {
     final reportsProvider = context.read<ReportsProvider>();
-    final voiceProvider = context.read<VoiceProvider>();
-
-    // Stop current audio before skipping
-    await voiceProvider.stopReportAudio();
 
     // Use the currently displayed reports (respects filter, category, and search)
     final reports = getCurrentReports();

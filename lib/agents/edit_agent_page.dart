@@ -183,6 +183,8 @@ class _EditAgentPageState extends State<EditAgentPage> {
     if (confirmed == true) {
       final success = await CustomFaceService.deleteFace(id);
       if (success && mounted) {
+        // Refresh the provider cache
+        context.read<CustomFaceProvider>().refresh();
         setState(() {
           _customFaces.removeWhere((f) => f.id == id);
           if (_customFaceId == id) {
@@ -229,6 +231,8 @@ class _EditAgentPageState extends State<EditAgentPage> {
           });
         },
         onFaceSaved: (face) {
+          // Refresh the provider cache so FacePageContent can find it
+          context.read<CustomFaceProvider>().refresh();
           setState(() {
             _showFaceGenerator = false;
             _customFaces.add(face);

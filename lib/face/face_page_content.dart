@@ -6,7 +6,6 @@ import '../models/models.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
 import '../services/services.dart';
-import '../services/custom_face_service.dart';
 import '../services/image_cache_service.dart';
 import 'face_eyes.dart';
 import 'face_mouth.dart';
@@ -310,52 +309,44 @@ class _FacePageContentState extends State<FacePageContent> {
     Agent agent,
     VoiceProvider voiceProvider,
   ) {
-    return FutureBuilder<String?>(
-      future: CustomFaceService.getLocalPath(agent.customFaceId!),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(color: Colors.white54),
-          );
-        }
+    // Use synchronous lookup from cached provider (no FutureBuilder needed)
+    final customFaceProvider = context.read<CustomFaceProvider>();
+    final localPath = customFaceProvider.getLocalPath(agent.customFaceId);
 
-        final localPath = snapshot.data;
-        if (localPath == null) {
-          // Fallback to robot face if custom face not found
-          return _buildRobotFaceFallback(agent, voiceProvider);
-        }
+    if (localPath == null) {
+      // Fallback to robot face if custom face not found
+      return _buildRobotFaceFallback(agent, voiceProvider);
+    }
 
-        return Stack(
-          children: [
-            // Full screen custom face image
-            Positioned.fill(
-              child: Image.file(
-                File(localPath),
-                fit: BoxFit.cover,
-                alignment: Alignment.topCenter,
-                errorBuilder: (_, __, ___) =>
-                    _buildRobotFaceFallback(agent, voiceProvider),
-              ),
+    return Stack(
+      children: [
+        // Full screen custom face image
+        Positioned.fill(
+          child: Image.file(
+            File(localPath),
+            fit: BoxFit.cover,
+            alignment: Alignment.topCenter,
+            errorBuilder: (_, __, ___) =>
+                _buildRobotFaceFallback(agent, voiceProvider),
+          ),
+        ),
+
+        // Status text at bottom
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: AppSpacing.lg,
+          child: Text(
+            voiceProvider.state.statusText,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 14,
+              color: Colors.white.withOpacity(0.5),
             ),
-
-            // Status text at bottom
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: AppSpacing.lg,
-              child: Text(
-                voiceProvider.state.statusText,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: AppTextStyles.fontFamily,
-                  fontSize: 14,
-                  color: Colors.white.withOpacity(0.5),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 

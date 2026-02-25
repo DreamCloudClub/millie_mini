@@ -648,6 +648,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
               onRefresh: _restartAudio,
               onExit: widget.onExit,
               onSkip: widget.onSkip != null ? () => widget.onSkip!(context) : null,
+              useSkipAsExit: true,
             ),
           ],
         ),

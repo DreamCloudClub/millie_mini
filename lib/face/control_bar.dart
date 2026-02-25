@@ -15,6 +15,7 @@ class ControlBar extends StatelessWidget {
   final VoidCallback? onGamePause;
   final VoidCallback? onGameResume;
   final VoidCallback? onRecord;
+  final bool useSkipAsExit;
 
   const ControlBar({
     super.key,
@@ -27,6 +28,7 @@ class ControlBar extends StatelessWidget {
     this.onGamePause,
     this.onGameResume,
     this.onRecord,
+    this.useSkipAsExit = false,
   });
 
   @override
@@ -147,13 +149,21 @@ class ControlBar extends StatelessWidget {
                     buttonColor: Colors.blue,
                   ),
 
-              // Exit button (right side)
-              _ControlButton(
-                icon: Icons.close,
-                label: 'Exit',
-                onTap: onExit,
-                buttonColor: AppColors.primaryOrange,
-              ),
+              // Skip button (for reports) or Exit button
+              if (useSkipAsExit && onSkip != null)
+                _ControlButton(
+                  icon: Icons.skip_next,
+                  label: 'Skip',
+                  onTap: onSkip!,
+                  buttonColor: AppColors.primaryOrange,
+                )
+              else
+                _ControlButton(
+                  icon: Icons.close,
+                  label: 'Exit',
+                  onTap: onExit,
+                  buttonColor: AppColors.primaryOrange,
+                ),
             ],
           ),
         );

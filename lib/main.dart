@@ -98,6 +98,9 @@ class MillieMiniApp extends StatelessWidget {
           create: (_) => FaceImageProvider(),
         ),
         ChangeNotifierProvider(
+          create: (_) => CustomFaceProvider(),
+        ),
+        ChangeNotifierProvider(
           create: (_) => OpenClawProvider(storageService),
         ),
         ChangeNotifierProvider(
@@ -159,6 +162,7 @@ class _AppNavigatorState extends State<AppNavigator> {
       context.read<GameSettingsProvider>().init(),
       context.read<CustomQuizProvider>().loadQuizzes(),
       context.read<FaceImageProvider>().init(),
+      context.read<CustomFaceProvider>().init(),
       context.read<OpenClawProvider>().init(),
       context.read<ReportsProvider>().init(),
     ]);
