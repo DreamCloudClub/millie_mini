@@ -948,14 +948,14 @@ Respond with ONLY one of these formats.''',
           // Robot face
           if (activeAgent != null)
             Container(
-              width: 200,
-              height: 200,
+              width: 280,
+              height: 280,
               decoration: BoxDecoration(
                 color: Colors.black,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: Colors.lightBlueAccent,
-                  width: 4,
+                  width: 5,
                 ),
               ),
               child: Center(
@@ -964,7 +964,7 @@ Respond with ONLY one of these formats.''',
                   eyeShape: activeAgent.eyeShape,
                   faceImageId: activeAgent.faceImageId,
                   customFaceId: activeAgent.customFaceId,
-                  size: 200,
+                  size: 280,
                   showBackground: false,
                 ),
               ),
@@ -1419,21 +1419,24 @@ Respond with ONLY one of these formats.''',
     final activeAgent = agentProvider.activeAgent;
 
     return Padding(
-      padding: const EdgeInsets.all(AppSpacing.xl),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xl * 3,
+        vertical: AppSpacing.xl,
+      ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           // Robot face
           if (activeAgent != null)
             Container(
-              width: 180,
-              height: 180,
+              width: 280,
+              height: 280,
               decoration: BoxDecoration(
                 color: Colors.black,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: Colors.lightBlueAccent,
-                  width: 4,
+                  width: 5,
                 ),
               ),
               child: Center(
@@ -1442,19 +1445,31 @@ Respond with ONLY one of these formats.''',
                   eyeShape: activeAgent.eyeShape,
                   faceImageId: activeAgent.faceImageId,
                   customFaceId: activeAgent.customFaceId,
-                  size: 180,
+                  size: 280,
                   showBackground: false,
                 ),
               ),
             ),
           const SizedBox(height: AppSpacing.xl),
 
+          // Title
+          const Text(
+            'Thank You!',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.md),
+
+          // Subtitle
           Text(
             _template?.effectiveClosingMessage ?? ConversationTemplate.defaultClosingMessage,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.w500,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 18,
             ),
             textAlign: TextAlign.center,
           ),
