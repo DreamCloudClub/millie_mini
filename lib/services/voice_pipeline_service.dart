@@ -14,8 +14,6 @@ import '../models/models.dart';
 import '../utils/constants.dart';
 import 'openai_service.dart';
 import 'storage_service.dart';
-import 'usage_tracking_service.dart';
-import '../services/supabase_service.dart';
 import 'note_tools_handler.dart';
 import 'intent_router.dart';
 
@@ -47,7 +45,7 @@ class VoicePipelineService {
   String? _currentBio;
   String? _currentUserId;
   String? _currentUserEmail;
-  AIServiceStatus? _currentSubscriptionStatus;
+  String? _currentSubscriptionStatus;
   Function()? _getConversationHistory;
   
   // VAD parameters
@@ -149,7 +147,7 @@ class VoicePipelineService {
     String? bio,
     String? userId,
     String? userEmail,
-    AIServiceStatus? subscriptionStatus,
+    String? subscriptionStatus,
     Function()? getConversationHistory,
   }) async {
     // Don't start if already recording (but allow if processing/playing since those should finish first)
@@ -1164,7 +1162,7 @@ class VoicePipelineService {
     String? bio,
     String? userId,
     String? userEmail,
-    AIServiceStatus? subscriptionStatus,
+    String? subscriptionStatus,
     List<Map<String, String>> Function()? getConversationHistory,
   }) {
     // Only configure if not already configured
@@ -1994,30 +1992,7 @@ Format note content nicely with line breaks, bullet points, and clear sections.
       
       if (response.content.isNotEmpty) {
         debugPrint('LLM response received: ${response.content.substring(0, response.content.length > 50 ? 50 : response.content.length)}...');
-        
-        // Record token usage after successful call (for tracking, not blocking)
-        if (_currentUserId != null && 
-            _currentUserEmail != null && 
-            _currentSubscriptionStatus != null &&
-            _currentSubscriptionStatus!.isUsable) {
-          
-          try {
-            debugPrint('Recording usage: userId=${_currentUserId}, email=${_currentUserEmail}, status=${_currentSubscriptionStatus}, tokens=$totalTokensUsed');
-            await UsageTrackingService.recordUsage(
-              userId: _currentUserId!,
-              userEmail: _currentUserEmail!,
-              subscriptionStatus: _currentSubscriptionStatus!,
-              tokensUsed: totalTokensUsed,
-            );
-            debugPrint('✓ Token usage recorded: $totalTokensUsed tokens');
-          } catch (e) {
-            debugPrint('Error recording usage (non-fatal): $e');
-            // Don't fail the call if usage recording fails
-          }
-        } else {
-          debugPrint('⚠ Usage NOT recorded - userId: $_currentUserId, email: $_currentUserEmail, status: $_currentSubscriptionStatus, isUsable: ${_currentSubscriptionStatus?.isUsable}');
-        }
-        
+
         return response.content;
       }
       
@@ -2484,7 +2459,7 @@ Format note content nicely with line breaks, bullet points, and clear sections.
     String? bio,
     String? userId,
     String? userEmail,
-    AIServiceStatus? subscriptionStatus,
+    String? subscriptionStatus,
     Function()? getConversationHistory,
   }) async {
     try {

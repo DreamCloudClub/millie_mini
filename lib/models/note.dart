@@ -62,6 +62,18 @@ class Note {
     };
   }
 
+  /// Convert to JSON for local storage
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'user_id': userId,
+      'title': title,
+      'content': content,
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+    };
+  }
+
   /// Create a copy with updated fields
   Note copyWith({
     String? title,

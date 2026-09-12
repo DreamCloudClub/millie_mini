@@ -5,7 +5,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
 import '../models/models.dart';
-import 'supabase_service.dart';
 
 /// Service for handling reminder notifications (pre-recorded alerts when app is closed)
 class ReminderNotificationService {
@@ -232,69 +231,16 @@ class ReminderNotificationService {
   /// When a scheduled notification is tapped, mark the reminder as triggered
   void _onNotificationTapped(NotificationResponse response) async {
     debugPrint('ReminderNotificationService: Notification tapped: ${response.payload}');
-    
+
     // The payload contains the reminder ID
+    // In local-only mode, the reminder will be marked as triggered by the scheduler service
+    // on next poll. We just log the tap here.
     if (response.payload != null && response.payload!.isNotEmpty) {
       final reminderId = response.payload!;
-      debugPrint('ReminderNotificationService: Marking reminder $reminderId as triggered from notification tap');
-      
-      // Mark the reminder as triggered in the database
-      // This ensures lastTriggeredAt is set even if the app was closed when notification fired
-      try {
-        final now = DateTime.now();
-        final nowUtc = now.isUtc ? now : now.toUtc();
-        
-        // Get the reminder to check if it's recurring
-        final reminderResponse = await SupabaseConfig.client
-            .from('reminders')
-            .select()
-            .eq('id', reminderId)
-            .single();
-        
-        if (reminderResponse != null) {
-          final isRecurring = reminderResponse['recurrence'] != null && 
-                              reminderResponse['recurrence'] != 'none';
-          
-          // Use the scheduled_at time (when alert was supposed to trigger) as last_triggered_at
-          final scheduledAtStr = reminderResponse['scheduled_at'] as String?;
-          final triggerTime = scheduledAtStr != null 
-              ? DateTime.parse(scheduledAtStr)
-              : now; // Fallback to now if scheduled_at is missing
-          final triggerTimeUtc = triggerTime.isUtc ? triggerTime : triggerTime.toUtc();
-          
-          if (isRecurring) {
-            // For recurring, we need to reschedule it
-            // But we'll let the scheduler handle that on next poll
-            // Just mark as triggered for now
-            await SupabaseConfig.client
-                .from('reminders')
-                .update({
-                  'last_triggered_at': triggerTimeUtc.toIso8601String(), // Use scheduled time, not current time
-                  'updated_at': nowUtc.toIso8601String(),
-                })
-                .eq('id', reminderId);
-          } else {
-            // For one-time, mark as sent and triggered
-            await SupabaseConfig.client
-                .from('reminders')
-                .update({
-                  'reminder_sent': true,
-                  'last_triggered_at': triggerTimeUtc.toIso8601String(), // Use scheduled time, not current time
-                  'updated_at': nowUtc.toIso8601String(),
-                })
-                .eq('id', reminderId);
-          }
-          
-          debugPrint('ReminderNotificationService: Successfully marked reminder $reminderId as triggered');
-          
-          // Trigger refresh of ReminderProvider if available
-          // This will be handled by the scheduler service on next poll
-        }
-      } catch (e) {
-        debugPrint('ReminderNotificationService: Error marking reminder as triggered: $e');
-      }
+      debugPrint('ReminderNotificationService: Notification tapped for reminder $reminderId');
+      // The scheduler service will handle marking as triggered on next poll
     }
-    
+
     // Navigation can be handled in main.dart or app lifecycle if needed
   }
   

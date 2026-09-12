@@ -2,32 +2,32 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/providers.dart';
-import '../providers/reports_provider.dart';
-import '../models/models.dart';
+import '../services/openclaw_service.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
-import '../services/services.dart';
 
 class DashboardPage extends StatelessWidget {
   final VoidCallback onLaunchMillie;
+  final void Function(String templateId) onLaunchKiosk;
   final VoidCallback onEditAgentProfile;
   final VoidCallback onEditUserProfile;
   final VoidCallback onEditAIService;
-  final VoidCallback onEditAccountSettings;
-  final VoidCallback onEditGameSettings;
   final VoidCallback onEditBrain;
-  final VoidCallback onEditReports;
+  final VoidCallback onEditDeviceSettings;
+  final VoidCallback onEditConversations;
+  final VoidCallback onViewReports;
 
   const DashboardPage({
     super.key,
     required this.onLaunchMillie,
+    required this.onLaunchKiosk,
     required this.onEditAgentProfile,
     required this.onEditUserProfile,
     required this.onEditAIService,
-    required this.onEditAccountSettings,
-    required this.onEditGameSettings,
     required this.onEditBrain,
-    required this.onEditReports,
+    required this.onEditDeviceSettings,
+    required this.onEditConversations,
+    required this.onViewReports,
   });
 
   @override
@@ -62,21 +62,35 @@ class DashboardPage extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Millie Mini AI text on left
-                    const Text(
-                      'Millie Mini AI',
-                      style: TextStyle(
-                        fontFamily: AppTextStyles.fontFamily,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
+                    // Millie Mini AI text on left (clickable)
+                    InkWell(
+                      onTap: () async {
+                        try {
+                          final uri = Uri.parse('https://milliebot.ai');
+                          await launchUrl(
+                            uri,
+                            mode: LaunchMode.externalApplication,
+                          );
+                        } catch (e) {
+                          debugPrint('Error launching URL: $e');
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: const Text(
+                        'Millie Mini AI',
+                        style: TextStyle(
+                          fontFamily: AppTextStyles.fontFamily,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
                       ),
                     ),
                     // Logo in center (clickable)
                     InkWell(
                       onTap: () async {
                         try {
-                          final uri = Uri.parse('https://dreamcloudclub.org/my-account/');
+                          final uri = Uri.parse('https://dreamcloudclub.org');
                           await launchUrl(
                             uri,
                             mode: LaunchMode.externalApplication,
@@ -85,7 +99,7 @@ class DashboardPage extends StatelessWidget {
                           debugPrint('Error launching URL: $e');
                           // Try alternative approach
                           try {
-                            final uri = Uri.parse('https://dreamcloudclub.org/my-account/');
+                            final uri = Uri.parse('https://dreamcloudclub.org');
                             await launchUrl(uri);
                           } catch (e2) {
                             debugPrint('Error launching URL (fallback): $e2');
@@ -102,14 +116,28 @@ class DashboardPage extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Dream Cloud text on right
-                    const Text(
-                      'Dream Cloud',
-                      style: TextStyle(
-                        fontFamily: AppTextStyles.fontFamily,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
+                    // Dream Cloud text on right (clickable)
+                    InkWell(
+                      onTap: () async {
+                        try {
+                          final uri = Uri.parse('https://dreamcloudclub.org');
+                          await launchUrl(
+                            uri,
+                            mode: LaunchMode.externalApplication,
+                          );
+                        } catch (e) {
+                          debugPrint('Error launching URL: $e');
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: const Text(
+                        'Dream Cloud',
+                        style: TextStyle(
+                          fontFamily: AppTextStyles.fontFamily,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textPrimary,
+                        ),
                       ),
                     ),
                   ],
@@ -121,6 +149,7 @@ class DashboardPage extends StatelessWidget {
               _AgentProfileCard(
                 onEdit: onEditAgentProfile,
                 onLaunch: onLaunchMillie,
+                onLaunchKiosk: onLaunchKiosk,
               ),
               const SizedBox(height: AppSpacing.md),
 
@@ -128,24 +157,24 @@ class DashboardPage extends StatelessWidget {
               _UserProfileCard(onEdit: onEditUserProfile),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 3: Reports Settings
-              _ReportsCard(onEdit: onEditReports),
+              // Card 3: Conversations
+              _ConversationsCard(onEdit: onEditConversations),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 4: Game Settings
-              _GameSettingsCard(onEdit: onEditGameSettings),
+              // Card 4: Reports
+              _ReportsCard(onView: onViewReports),
               const SizedBox(height: AppSpacing.md),
 
               // Card 5: AI Service
               _AIServiceCard(onEdit: onEditAIService),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 6: Brain Settings
+              // Card 6: Open Claw
               _BrainCard(onEdit: onEditBrain),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 7: Account Settings
-              _AccountSettingsCard(onEdit: onEditAccountSettings),
+              // Card 7: Device Settings
+              _DeviceSettingsCard(onEdit: onEditDeviceSettings),
               const SizedBox(height: AppSpacing.lg),
             ],
           ),
@@ -158,10 +187,12 @@ class DashboardPage extends StatelessWidget {
 class _AgentProfileCard extends StatefulWidget {
   final VoidCallback onEdit;
   final VoidCallback onLaunch;
+  final void Function(String templateId) onLaunchKiosk;
 
   const _AgentProfileCard({
     required this.onEdit,
     required this.onLaunch,
+    required this.onLaunchKiosk,
   });
 
   @override
@@ -172,78 +203,10 @@ class _AgentProfileCardState extends State<_AgentProfileCard> {
   int _displayIndex = 0;
   bool _initialized = false;
 
-  Future<void> _handleLaunch(
-    BuildContext context,
-    AIService? aiService,
-    VoidCallback onLaunch,
-  ) async {
-    // Only check usage for Dream Cloud AI service
-    if (aiService != null && aiService.isDreamCloud && aiService.status.isUsable) {
-      // Get user info
-      final authProvider = context.read<AuthProvider>();
-      final userId = authProvider.userProfile?.id;
-      final userEmail = authProvider.userProfile?.email;
-
-      if (userId != null && userEmail != null) {
-        try {
-          // Check current usage
-          final usageInfo = await UsageTrackingService.getCurrentUsage(
-            userId,
-            userEmail: userEmail,
-            subscriptionStatus: aiService.status,
-          );
-
-          final tokensUsed = usageInfo['tokens_used'] as int? ?? 0;
-          final tokenLimit = usageInfo['token_limit'] as int? ?? 0;
-          final tokensRemaining = usageInfo['tokens_remaining'] as int? ?? 0;
-
-          // If limit exceeded (no tokens remaining or tokens used >= limit), show modal
-          if (tokenLimit > 0 && (tokensRemaining <= 0 || tokensUsed >= tokenLimit)) {
-            final subscriptionTier = _getSubscriptionTierName(aiService.status);
-            if (context.mounted) {
-              showDialog(
-                context: context,
-                builder: (context) => UsageLimitModal(
-                  tokensUsed: tokensUsed,
-                  tokenLimit: tokenLimit,
-                  subscriptionTier: subscriptionTier,
-                ),
-              );
-            }
-            return; // Don't launch
-          }
-        } catch (e) {
-          debugPrint('Error checking usage limit (allowing launch): $e');
-          // On error, allow launch to proceed
-        }
-      }
-    }
-
-    // Launch normally if not Dream Cloud, or if within limit
-    onLaunch();
-  }
-
-  String _getSubscriptionTierName(AIServiceStatus status) {
-    switch (status) {
-      case AIServiceStatus.holder:
-        return 'Holder';
-      case AIServiceStatus.basic:
-        return 'Basic';
-      case AIServiceStatus.pro:
-        return 'Pro';
-      case AIServiceStatus.active:
-        return 'Active';
-      case AIServiceStatus.trial:
-        return 'Trial';
-      default:
-        return 'Subscription';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Consumer3<AgentProvider, PersonalityProvider, AIServiceProvider>(
-      builder: (context, agentProvider, personalityProvider, aiServiceProvider, _) {
+    return Consumer2<AgentProvider, PersonalityProvider>(
+      builder: (context, agentProvider, personalityProvider, _) {
         final agents = agentProvider.agents;
         final activeAgent = agentProvider.activeAgent;
 
@@ -266,7 +229,8 @@ class _AgentProfileCardState extends State<_AgentProfileCard> {
         }
 
         final agent = agents[_displayIndex];
-        final personality = personalityProvider.getPersonalityById(agent.personalityId);
+        final personality =
+            personalityProvider.getPersonalityById(agent.personalityId);
 
         void goToPrevious() {
           setState(() {
@@ -410,18 +374,47 @@ class _AgentProfileCardState extends State<_AgentProfileCard> {
 
               const SizedBox(height: AppSpacing.lg),
 
-              // Launch button - activates and launches displayed agent
+              // Launch buttons row
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                child: AppButton(
-                  label: 'Launch',
-                  onPressed: () {
-                    // Activate this agent then launch
-                    agentProvider.setActiveAgent(agent.id);
-                    final aiService = aiServiceProvider.getServiceById(agent.aiServiceId);
-                    _handleLaunch(context, aiService, widget.onLaunch);
+                child: Consumer<ConversationTemplateProvider>(
+                  builder: (context, templateProvider, _) {
+                    final activeTemplate = templateProvider.activeTemplate;
+
+                    return Row(
+                      children: [
+                        // Main Launch button
+                        Expanded(
+                          child: AppButton(
+                            label: 'Launch',
+                            onPressed: () {
+                              // Activate this agent then launch
+                              agentProvider.setActiveAgent(agent.id);
+                              widget.onLaunch();
+                            },
+                            isFullWidth: true,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        // Kiosk Launch button
+                        Expanded(
+                          child: AppButton(
+                            label: 'Kiosk',
+                            onPressed: activeTemplate != null
+                                ? () {
+                                    agentProvider.setActiveAgent(agent.id);
+                                    widget.onLaunchKiosk(activeTemplate.id);
+                                  }
+                                : null,
+                            isFullWidth: true,
+                            customColor: activeTemplate != null
+                                ? AppColors.dreamCloudBlue
+                                : AppColors.textLight,
+                          ),
+                        ),
+                      ],
+                    );
                   },
-                  isFullWidth: true,
                 ),
               ),
             ],
@@ -452,13 +445,21 @@ class _UserProfileCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _DetailRow(label: 'Username', value: user.username, compactSpacing: true),
+              _DetailRow(
+                  label: 'Username', value: user.username, compactSpacing: true),
               if (user.fullName.isNotEmpty)
-                _DetailRow(label: 'Full Name', value: user.fullName, compactSpacing: true),
+                _DetailRow(
+                    label: 'Full Name',
+                    value: user.fullName,
+                    compactSpacing: true),
               if (user.pronouns != null && user.pronouns!.isNotEmpty)
-                _DetailRow(label: 'Pronouns', value: user.pronouns!, compactSpacing: true),
+                _DetailRow(
+                    label: 'Pronouns',
+                    value: user.pronouns!,
+                    compactSpacing: true),
               if (user.bio != null && user.bio!.isNotEmpty)
-                _DetailRow(label: 'Bio', value: user.bio!, compactSpacing: true),
+                _DetailRow(
+                    label: 'Bio', value: user.bio!, compactSpacing: true),
             ],
           ),
         );
@@ -472,100 +473,29 @@ class _AIServiceCard extends StatelessWidget {
 
   const _AIServiceCard({required this.onEdit});
 
-  Color _getStatusColor(AIServiceStatus status) {
-    switch (status) {
-      case AIServiceStatus.holder:
-        return Colors.amber;
-      case AIServiceStatus.active:
-        return AppColors.success;
-      case AIServiceStatus.trial:
-        return Colors.blue;
-      case AIServiceStatus.pending:
-        return Colors.orange;
-      case AIServiceStatus.expired:
-      case AIServiceStatus.inactive:
-      case AIServiceStatus.notFound:
-        return AppColors.error;
-      default:
-        return AppColors.textLight;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Consumer2<AgentProvider, AIServiceProvider>(
-      builder: (context, agentProvider, aiServiceProvider, _) {
-        final agent = agentProvider.activeAgent;
-        final service = agent != null
-            ? aiServiceProvider.getServiceById(agent.aiServiceId)
-            : aiServiceProvider.dreamCloudService;
+    return Consumer<AIServiceProvider>(
+      builder: (context, aiServiceProvider, _) {
+        final hasOpenAI = aiServiceProvider.hasOpenAIKey;
 
         return AppCard(
           title: 'AI Service',
           onEdit: onEdit,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
+              Icon(
+                hasOpenAI ? Icons.check_circle : Icons.warning,
+                color: hasOpenAI ? AppColors.success : Colors.orange,
+                size: 20,
+              ),
+              const SizedBox(width: AppSpacing.sm),
               Text(
-                service?.displayName ?? 'Dream Cloud AI',
-                style: AppTextStyles.bodyLarge.copyWith(fontSize: 18),
-              ),
-              if (service != null && service.isDreamCloud && service.status != AIServiceStatus.unknown)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.sm),
-                  child: Text(
-                    service.status.displayName,
-                    style: AppTextStyles.bodyMedium.copyWith(
-                      fontSize: 16,
-                      color: _getStatusColor(service.status),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                hasOpenAI ? 'OpenAI API Key configured' : 'OpenAI API Key required',
+                style: AppTextStyles.bodyMedium.copyWith(
+                  fontSize: 16,
+                  color: hasOpenAI ? AppColors.textPrimary : Colors.orange,
                 ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _GameSettingsCard extends StatelessWidget {
-  final VoidCallback onEdit;
-
-  const _GameSettingsCard({required this.onEdit});
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<GameSettingsProvider>(
-      builder: (context, gameSettingsProvider, _) {
-        final settings = gameSettingsProvider.settings;
-
-        return AppCard(
-          title: 'Game Settings',
-          onEdit: onEdit,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _DetailRow(
-                label: 'Time Limit',
-                value: settings.timeLimit.displayName,
-                compactSpacing: true,
-              ),
-              _DetailRow(
-                label: 'Difficulty',
-                value: settings.difficulty.displayName,
-                compactSpacing: true,
-              ),
-              _DetailRow(
-                label: 'Display Size',
-                value: settings.displaySize.displayName,
-                compactSpacing: true,
-              ),
-              _DetailRow(
-                label: 'Auto-Play',
-                value: settings.autoRecord ? 'On' : 'Off',
-                compactSpacing: true,
               ),
             ],
           ),
@@ -613,7 +543,7 @@ class _BrainCard extends StatelessWidget {
     return Consumer<OpenClawProvider>(
       builder: (context, provider, _) {
         return AppCard(
-          title: 'Brain Settings',
+          title: 'Open Claw',
           onEdit: onEdit,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -624,7 +554,8 @@ class _BrainCard extends StatelessWidget {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: _getStatusColor(provider.connectionState, provider.enabled),
+                      color:
+                          _getStatusColor(provider.connectionState, provider.enabled),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -633,7 +564,8 @@ class _BrainCard extends StatelessWidget {
                     _getStatusText(provider.connectionState, provider.enabled),
                     style: AppTextStyles.bodyLarge.copyWith(
                       fontSize: 18,
-                      color: _getStatusColor(provider.connectionState, provider.enabled),
+                      color: _getStatusColor(
+                          provider.connectionState, provider.enabled),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -657,90 +589,78 @@ class _BrainCard extends StatelessWidget {
   }
 }
 
-class _ReportsCard extends StatelessWidget {
+class _DeviceSettingsCard extends StatelessWidget {
   final VoidCallback onEdit;
 
-  const _ReportsCard({required this.onEdit});
-
-  String _capitalize(String s) {
-    if (s.isEmpty) return s;
-    return s[0].toUpperCase() + s.substring(1).toLowerCase();
-  }
+  const _DeviceSettingsCard({required this.onEdit});
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ReportsProvider>(
-      builder: (context, reportsProvider, _) {
-        final schedules = reportsProvider.enabledSchedules;
-        final watchlist = reportsProvider.enabledWatchlist;
+    return AppCard(
+      title: 'Device Settings',
+      onEdit: onEdit,
+      child: Row(
+        children: [
+          Icon(
+            Icons.phonelink_setup,
+            color: AppColors.dreamCloudBlue,
+            size: 20,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            'Manage device permissions',
+            style: AppTextStyles.bodyMedium.copyWith(
+              fontSize: 16,
+              color: AppColors.textPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-        // Get unique main categories from watchlist (ignore subcategories for display)
-        final mainCategories = watchlist
-            .where((w) => w.subcategory == null)
-            .map((w) => _capitalize(w.category))
-            .toSet()
-            .toList()
-          ..sort();
+class _ConversationsCard extends StatelessWidget {
+  final VoidCallback onEdit;
+
+  const _ConversationsCard({required this.onEdit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<ConversationTemplateProvider>(
+      builder: (context, provider, _) {
+        final activeTemplate = provider.activeTemplate;
+        final templateCount = provider.templates.length;
 
         return AppCard(
-          title: 'Reports Settings',
+          title: 'Conversations',
           onEdit: onEdit,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              // Categories section
-              _DetailRow(
-                label: 'Categories',
-                value: mainCategories.isNotEmpty
-                    ? mainCategories.join(', ')
-                    : 'None selected',
-                compactSpacing: true,
+              Icon(
+                Icons.chat_outlined,
+                color: AppColors.dreamCloudBlue,
+                size: 20,
               ),
-
-              // Schedule section
-              if (schedules.isEmpty)
-                _DetailRow(
-                  label: 'Schedule',
-                  value: 'No schedules set',
-                  compactSpacing: true,
-                )
-              else
-                ...schedules.map((schedule) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            width: 120,
-                            child: Text(
-                              schedules.indexOf(schedule) == 0
-                                  ? 'Schedule'
-                                  : '',
-                              style: AppTextStyles.label.copyWith(fontSize: 16),
-                            ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  schedule.timeRangeDisplay,
-                                  style: AppTextStyles.bodyMedium.copyWith(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '${schedule.daysDisplay} • ${schedule.frequency.displayName}',
-                                  style: AppTextStyles.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    )),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  activeTemplate != null
+                      ? 'Active: ${activeTemplate.name}'
+                      : 'No active conversation',
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    fontSize: 16,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              if (templateCount > 0)
+                Text(
+                  '$templateCount configured',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textLight,
+                  ),
+                ),
             ],
           ),
         );
@@ -749,23 +669,41 @@ class _ReportsCard extends StatelessWidget {
   }
 }
 
-class _AccountSettingsCard extends StatelessWidget {
-  final VoidCallback onEdit;
+class _ReportsCard extends StatelessWidget {
+  final VoidCallback onView;
 
-  const _AccountSettingsCard({required this.onEdit});
+  const _ReportsCard({required this.onView});
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      title: 'Account Settings',
-      onEdit: onEdit,
-      child: const Text(
-        'Manage your account, security, and preferences',
-        style: TextStyle(
-          fontSize: 16,
-          color: AppColors.textPrimary,
-        ),
-      ),
+    return Consumer<ConversationReportProvider>(
+      builder: (context, provider, _) {
+        final reportCount = provider.completedReports.length;
+
+        return AppCard(
+          title: 'Reports',
+          onEdit: onView,
+          child: Row(
+            children: [
+              Icon(
+                Icons.assessment_outlined,
+                color: AppColors.dreamCloudBlue,
+                size: 20,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                reportCount == 0
+                    ? 'No reports yet'
+                    : '$reportCount completed report${reportCount == 1 ? '' : 's'}',
+                style: AppTextStyles.bodyMedium.copyWith(
+                  fontSize: 16,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -808,4 +746,3 @@ class _DetailRow extends StatelessWidget {
     );
   }
 }
-

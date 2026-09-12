@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import '../services/supabase_service.dart';
 import '../services/storage_service.dart';
 
 /// Represents a tool/function call requested by the AI
@@ -49,52 +48,42 @@ class ChatCompletionResponse {
   bool get hasToolCalls => toolCalls != null && toolCalls!.isNotEmpty;
 }
 
-/// Service to manage OpenAI API calls using the master API key from Supabase
+/// Service to manage OpenAI API calls using locally stored API key
 class OpenAIService {
   final StorageService _storage;
-  static const String _cacheKeyName = 'cached_openai_key';
-  static const Duration _cacheExpiry = Duration(hours: 24);
-  
+
   OpenAIService(this._storage);
-  
-  /// Get the OpenAI API key from Supabase
-  /// Checks local cache first, then fetches from Supabase
+
+  /// Get the OpenAI API key from local secure storage
   Future<String?> getApiKey() async {
     try {
-      // Check cache first
-      final cached = await _getCachedKey();
-      if (cached != null) {
-        debugPrint('Using cached OpenAI API key');
-        return cached;
+      final apiKey = await _storage.getApiKey('openai');
+      if (apiKey != null && apiKey.isNotEmpty) {
+        return apiKey;
       }
-      
-      // Fetch from Supabase
-      debugPrint('Fetching OpenAI API key from Supabase...');
-      final response = await SupabaseConfig.client
-          .from('service_config')
-          .select('api_key')
-          .eq('service_name', 'openai')
-          .eq('is_active', true)
-          .maybeSingle();
-      
-      if (response != null && response['api_key'] != null) {
-        final apiKey = response['api_key'] as String;
-        
-        if (apiKey.isNotEmpty) {
-          // Cache it
-          await _saveCachedKey(apiKey);
-          
-          debugPrint('OpenAI API key fetched successfully');
-          return apiKey;
-        }
-      }
-      
-      debugPrint('No OpenAI API key found in Supabase');
+      debugPrint('No OpenAI API key found in local storage');
       return null;
     } catch (e) {
-      debugPrint('Error fetching OpenAI API key: $e');
-      // Try cached key as fallback
-      return await _getCachedKey();
+      debugPrint('Error getting OpenAI API key: $e');
+      return null;
+    }
+  }
+
+  /// Test if the API key is valid by making a simple API call
+  Future<bool> testApiKey(String apiKey) async {
+    try {
+      final uri = Uri.parse('https://api.openai.com/v1/models');
+      final response = await http.get(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $apiKey',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('Error testing API key: $e');
+      return false;
     }
   }
   
@@ -649,43 +638,6 @@ class OpenAIService {
     }
   }
 
-  // Cache management
-  Future<String?> _getCachedKey() async {
-    try {
-      final cachedData = await _storage.getString(_cacheKeyName);
-      if (cachedData == null) return null;
-      
-      final data = jsonDecode(cachedData);
-      final key = data['key'] as String?;
-      final timestamp = DateTime.tryParse(data['timestamp'] ?? '');
-      
-      if (key == null || timestamp == null) return null;
-      
-      // Check if cache is expired
-      if (DateTime.now().difference(timestamp) > _cacheExpiry) {
-        await _storage.delete(_cacheKeyName);
-        return null;
-      }
-      
-      return key;
-    } catch (e) {
-      debugPrint('Error reading cached key: $e');
-      return null;
-    }
-  }
-  
-  Future<void> _saveCachedKey(String key) async {
-    try {
-      final data = jsonEncode({
-        'key': key,
-        'timestamp': DateTime.now().toIso8601String(),
-      });
-      await _storage.saveString(_cacheKeyName, data);
-    } catch (e) {
-      debugPrint('Error caching key: $e');
-    }
-  }
-  
   Future<String> _saveAudioFile(List<int> audioBytes) async {
     try {
       final directory = await getTemporaryDirectory();
@@ -698,11 +650,6 @@ class OpenAIService {
       debugPrint('Error saving audio file: $e');
       rethrow;
     }
-  }
-  
-  /// Clear cached API key (e.g., on logout)
-  Future<void> clearCache() async {
-    await _storage.delete(_cacheKeyName);
   }
   
   /// Analyze a reference image using GPT-4 Vision and create an enhanced prompt

@@ -3,40 +3,36 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'services/services.dart';
-import 'services/image_cache_service.dart';
 import 'providers/providers.dart';
 import 'providers/openclaw_provider.dart';
-import 'providers/reports_provider.dart';
 import 'utils/constants.dart';
-import 'splash_page.dart';
-import 'auth/login_page.dart';
-import 'auth/signup_page.dart';
 import 'dashboard/dashboard_page.dart';
 import 'dashboard/user_profile_edit_page.dart';
-import 'dashboard/account_settings_edit_page.dart';
-import 'dashboard/game_settings_edit_page.dart';
 import 'dashboard/brain_settings_page.dart';
-import 'dashboard/reports_settings_page.dart';
+import 'dashboard/device_settings_page.dart';
 import 'agents/agent_profiles_page.dart';
 import 'agents/edit_agent_page.dart';
 import 'personalities/personality_builder_page.dart';
 import 'ai_services/ai_services_page.dart';
-import 'ai_services/edit_dream_cloud_page.dart';
-import 'ai_services/edit_custom_service_page.dart';
 import 'conversation/conversation_page.dart';
 import 'reminders/edit_alert_page.dart';
-import 'dashboard/edit_custom_quiz_page.dart';
+import 'conversations/conversations_page.dart';
+import 'conversations/conversation_templates_page.dart';
+import 'conversations/edit_conversation_page.dart';
+import 'conversations/conversation_kiosk_page.dart';
+import 'conversations/reports_page.dart';
+import 'conversations/view_report_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Default: Show status bar, hide navigation bar
   // This gives a clean look while keeping time/battery visible
   await SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.manual,
     overlays: [SystemUiOverlay.top],
   );
-  
+
   // Lock orientation to portrait for phones, allow all for tablets
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -44,20 +40,17 @@ void main() async {
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
-  
-  // Initialize Supabase
-  await SupabaseConfig.initialize();
-  
+
   // Initialize storage service
   final storageService = StorageService();
   await storageService.init();
-  
+
   runApp(MillieMiniApp(storageService: storageService));
 }
 
 class MillieMiniApp extends StatelessWidget {
   final StorageService storageService;
-  
+
   const MillieMiniApp({
     super.key,
     required this.storageService,
@@ -89,22 +82,16 @@ class MillieMiniApp extends StatelessWidget {
           ),
         ),
         ChangeNotifierProvider(
-          create: (_) => GameSettingsProvider(storageService),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => CustomQuizProvider(),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => FaceImageProvider(),
-        ),
-        ChangeNotifierProvider(
           create: (_) => CustomFaceProvider(),
         ),
         ChangeNotifierProvider(
           create: (_) => OpenClawProvider(storageService),
         ),
         ChangeNotifierProvider(
-          create: (_) => ReportsProvider(),
+          create: (_) => ConversationTemplateProvider(storageService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => ConversationReportProvider(storageService),
         ),
       ],
       child: MaterialApp(
@@ -137,7 +124,6 @@ class AppNavigator extends StatefulWidget {
 
 class _AppNavigatorState extends State<AppNavigator> {
   bool _isInitialized = false;
-  bool _showSplash = true;
 
   @override
   void initState() {
@@ -146,92 +132,54 @@ class _AppNavigatorState extends State<AppNavigator> {
   }
 
   Future<void> _initializeApp() async {
-    // Initialize AuthProvider first (needed for other providers)
+    // Initialize AuthProvider first (creates local user)
     await context.read<AuthProvider>().init();
-    
+
     // Initialize notification service (needed for reminder alerts)
     final notificationService = ReminderNotificationService.getInstance();
     await notificationService.initialize();
-    
-    // Then initialize others (some depend on auth state)
+
+    // Then initialize others
     await Future.wait([
       context.read<AgentProvider>().init(),
       context.read<PersonalityProvider>().init(),
       context.read<AIServiceProvider>().init(),
       context.read<ReminderProvider>().init(),
-      context.read<GameSettingsProvider>().init(),
-      context.read<CustomQuizProvider>().loadQuizzes(),
-      context.read<FaceImageProvider>().init(),
       context.read<CustomFaceProvider>().init(),
       context.read<OpenClawProvider>().init(),
-      context.read<ReportsProvider>().init(),
+      context.read<ConversationTemplateProvider>().init(),
+      context.read<ConversationReportProvider>().init(),
     ]);
-    
+
     // Wire up ReminderIntentHandler in VoiceProvider
     final voiceProvider = context.read<VoiceProvider>();
     final reminderProvider = context.read<ReminderProvider>();
     voiceProvider.setReminderProvider(reminderProvider);
 
-    // Wire up CustomQuizProvider for custom game quizzes
-    final customQuizProvider = context.read<CustomQuizProvider>();
-    voiceProvider.setCustomQuizProvider(customQuizProvider);
-
     // Wire up OpenClawProvider for alternative LLM routing
     final openClawProvider = context.read<OpenClawProvider>();
     voiceProvider.setOpenClawProvider(openClawProvider);
 
-    // Wire up ReportsProvider for AI reports
-    final reportsProvider = context.read<ReportsProvider>();
-    voiceProvider.setReportsProvider(reportsProvider);
-
-    // Initialize WeatherService if API key is configured in Supabase
-    try {
-      debugPrint('Fetching OpenWeather API key from Supabase...');
-      final weatherResponse = await SupabaseConfig.client
-          .from('service_config')
-          .select('api_key')
-          .eq('service_name', 'openweather')
-          .eq('is_active', true)
-          .maybeSingle();
-
-      debugPrint('Weather response: $weatherResponse');
-      if (weatherResponse != null && weatherResponse['api_key'] != null) {
-        final weatherApiKey = weatherResponse['api_key'] as String;
-        if (weatherApiKey.isNotEmpty) {
-          voiceProvider.setWeatherApiKey(weatherApiKey);
-          debugPrint('Weather service initialized with key');
-        } else {
-          debugPrint('Weather API key is empty');
-        }
-      } else {
-        debugPrint('No OpenWeather config found in Supabase');
-      }
-    } catch (e) {
-      debugPrint('Error fetching OpenWeather API key: $e');
+    // Set OpenAI API key for realtime voice service
+    final aiServiceProvider = context.read<AIServiceProvider>();
+    final openAiKey = aiServiceProvider.openaiApiKey;
+    if (openAiKey != null && openAiKey.isNotEmpty) {
+      voiceProvider.setOpenAIApiKey(openAiKey);
     }
 
-    // Initialize reminder scheduler (only if user is logged in)
-    final authProvider = context.read<AuthProvider>();
-    if (authProvider.isLoggedIn) {
-      final scheduler = ReminderSchedulerService.getInstance();
+    // Initialize reminder scheduler
+    final scheduler = ReminderSchedulerService.getInstance();
 
-      // Set VoiceProvider reference for face mode alerts
-      scheduler.setVoiceProvider(voiceProvider);
-      // Set ReminderProvider reference for refreshing lists after alerts trigger
-      scheduler.setReminderProvider(reminderProvider);
+    // Set VoiceProvider reference for face mode alerts
+    scheduler.setVoiceProvider(voiceProvider);
+    // Set ReminderProvider reference for refreshing lists after alerts trigger
+    scheduler.setReminderProvider(reminderProvider);
 
-      // Start scheduler
-      scheduler.start();
+    // Start scheduler
+    scheduler.start();
 
-      debugPrint('Reminder scheduler started');
+    debugPrint('Reminder scheduler started');
 
-      // Sync animal, face, food, and story images in background (don't await - non-blocking)
-      ImageCacheService.syncAnimalImages();
-      ImageCacheService.syncFaceImages();
-      ImageCacheService.syncFoodImages();
-      ImageCacheService.syncStoryImages();
-    }
-    
     if (mounted) {
       setState(() {
         _isInitialized = true;
@@ -239,71 +187,25 @@ class _AppNavigatorState extends State<AppNavigator> {
     }
   }
 
-  void _onSplashComplete() {
-    setState(() {
-      _showSplash = false;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_showSplash) {
-      return SplashPage(
-        onInitComplete: _onSplashComplete,
+    if (!_isInitialized) {
+      return const Scaffold(
+        backgroundColor: AppColors.dreamCloudBlue,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Colors.white,
+          ),
+        ),
       );
     }
 
-    return Consumer<AuthProvider>(
-      builder: (context, auth, _) {
-        if (!_isInitialized || auth.isLoading) {
-          return const Scaffold(
-            backgroundColor: AppColors.dreamCloudBlue,
-            body: Center(
-              child: CircularProgressIndicator(
-                color: Colors.white,
-              ),
-            ),
-          );
-        }
-
-        if (!auth.isLoggedIn) {
-          return const AuthNavigator();
-        }
-
-        return const MainNavigator();
-      },
-    );
+    // Go directly to main navigator (no auth required)
+    return const MainNavigator();
   }
 }
 
-/// Handles auth flow navigation
-class AuthNavigator extends StatefulWidget {
-  const AuthNavigator({super.key});
-
-  @override
-  State<AuthNavigator> createState() => _AuthNavigatorState();
-}
-
-class _AuthNavigatorState extends State<AuthNavigator> {
-  bool _showLogin = true;
-
-  @override
-  Widget build(BuildContext context) {
-    if (_showLogin) {
-      return LoginPage(
-        onSignUpTap: () => setState(() => _showLogin = false),
-        onLoginSuccess: () {}, // Auth state change will trigger rebuild
-      );
-    }
-
-    return SignUpPage(
-      onLoginTap: () => setState(() => _showLogin = true),
-      onSignUpSuccess: () {}, // Auth state change will trigger rebuild
-    );
-  }
-}
-
-/// Handles main app navigation after login
+/// Handles main app navigation
 class MainNavigator extends StatefulWidget {
   const MainNavigator({super.key});
 
@@ -315,19 +217,20 @@ enum MainRoute {
   dashboard,
   face,
   userProfile,
-  accountSettings,
-  gameSettings,
   brainSettings,
-  reportsSettings,
+  deviceSettings,
   agentProfiles,
   editAgent,
   personalityBuilder,
   aiServices,
-  dreamCloud,
-  customService,
   editAlert,
   createAlert,
-  editCustomQuiz,
+  conversations,
+  conversationTemplates,
+  editConversation,
+  conversationKiosk,
+  reports,
+  viewReport,
 }
 
 class _MainNavigatorState extends State<MainNavigator> {
@@ -361,13 +264,17 @@ class _MainNavigatorState extends State<MainNavigator> {
       case MainRoute.dashboard:
         return DashboardPage(
           onLaunchMillie: () => _push(MainRoute.face),
+          onLaunchKiosk: (templateId) => _push(
+            MainRoute.conversationKiosk,
+            params: {'templateId': templateId},
+          ),
           onEditAgentProfile: () => _push(MainRoute.agentProfiles),
           onEditUserProfile: () => _push(MainRoute.userProfile),
           onEditAIService: () => _push(MainRoute.aiServices),
-          onEditAccountSettings: () => _push(MainRoute.accountSettings),
-          onEditGameSettings: () => _push(MainRoute.gameSettings),
           onEditBrain: () => _push(MainRoute.brainSettings),
-          onEditReports: () => _push(MainRoute.reportsSettings),
+          onEditDeviceSettings: () => _push(MainRoute.deviceSettings),
+          onEditConversations: () => _push(MainRoute.conversations),
+          onViewReports: () => _push(MainRoute.reports),
         );
 
       case MainRoute.face:
@@ -386,34 +293,6 @@ class _MainNavigatorState extends State<MainNavigator> {
           ),
         );
 
-      case MainRoute.accountSettings:
-        return PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _pop();
-          },
-          child: AccountSettingsEditPage(
-            onBack: _pop,
-            onLogout: () {}, // Auth state change will handle navigation
-            onDeleteAccount: () {}, // Auth state change will handle navigation
-          ),
-        );
-
-      case MainRoute.gameSettings:
-        return PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _pop();
-          },
-          child: GameSettingsEditPage(
-            onSaved: _pop,
-            onEditCustomQuiz: (quizId) => _push(
-              MainRoute.editCustomQuiz,
-              params: {'quizId': quizId},
-            ),
-          ),
-        );
-
       case MainRoute.brainSettings:
         return PopScope(
           canPop: false,
@@ -425,13 +304,13 @@ class _MainNavigatorState extends State<MainNavigator> {
           ),
         );
 
-      case MainRoute.reportsSettings:
+      case MainRoute.deviceSettings:
         return PopScope(
           canPop: false,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) _pop();
           },
-          child: ReportsSettingsPage(
+          child: DeviceSettingsPage(
             onBack: _pop,
           ),
         );
@@ -493,35 +372,6 @@ class _MainNavigatorState extends State<MainNavigator> {
           },
           child: AIServicesPage(
             onBack: _pop,
-            onEditDreamCloud: () => _push(MainRoute.dreamCloud),
-            onEditCustomService: (serviceId) => _push(
-              MainRoute.customService,
-              params: {'serviceId': serviceId},
-            ),
-          ),
-        );
-
-      case MainRoute.dreamCloud:
-        return PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _pop();
-          },
-          child: EditDreamCloudPage(
-            onBack: _pop,
-          ),
-        );
-
-      case MainRoute.customService:
-        return PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _pop();
-          },
-          child: EditCustomServicePage(
-            serviceId: currentRoute.params?['serviceId'] as String?,
-            onBack: _pop,
-            onSaved: _pop,
           ),
         );
 
@@ -539,16 +389,90 @@ class _MainNavigatorState extends State<MainNavigator> {
           ),
         );
 
-      case MainRoute.editCustomQuiz:
+      case MainRoute.conversations:
         return PopScope(
           canPop: false,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) _pop();
           },
-          child: EditCustomQuizPage(
-            quizId: currentRoute.params?['quizId'] as String?,
+          child: ConversationsPage(
             onBack: _pop,
-            onSaved: _pop,
+            onBrowseTemplates: () => _push(MainRoute.conversationTemplates),
+            onEditConversation: (conversationId) => _push(
+              MainRoute.editConversation,
+              params: {'conversationId': conversationId},
+            ),
+          ),
+        );
+
+      case MainRoute.conversationTemplates:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: ConversationTemplatesPage(
+            onBack: _pop,
+            onSelectTemplate: (template) => _push(
+              MainRoute.editConversation,
+              params: {'starterTemplate': template},
+            ),
+          ),
+        );
+
+      case MainRoute.editConversation:
+        final isFromTemplate = currentRoute.params?['starterTemplate'] != null;
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: EditConversationPage(
+            conversationId: currentRoute.params?['conversationId'] as String?,
+            starterTemplate: currentRoute.params?['starterTemplate'] as StarterTemplate?,
+            onBack: _pop,
+            onSaved: isFromTemplate
+                ? () { _pop(); _pop(); } // Skip templates page, go to Conversations
+                : _pop,
+          ),
+        );
+
+      case MainRoute.conversationKiosk:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _popToRoot();
+          },
+          child: ConversationKioskPage(
+            templateId: currentRoute.params?['templateId'] as String,
+            onExit: _popToRoot,
+          ),
+        );
+
+      case MainRoute.reports:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: ReportsPage(
+            onBack: _pop,
+            onViewReport: (reportId) => _push(
+              MainRoute.viewReport,
+              params: {'reportId': reportId},
+            ),
+          ),
+        );
+
+      case MainRoute.viewReport:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: ViewReportPage(
+            reportId: currentRoute.params?['reportId'] as String,
+            onBack: _pop,
           ),
         );
     }

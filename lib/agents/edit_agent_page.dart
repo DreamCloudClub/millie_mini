@@ -6,12 +6,11 @@ import '../models/models.dart';
 import '../models/custom_face.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
-import '../services/image_cache_service.dart';
 import '../services/custom_face_service.dart';
 import 'face_generator_page.dart';
 
 /// Face type options
-enum FaceType { robot, animal, custom }
+enum FaceType { robot, custom }
 
 class EditAgentPage extends StatefulWidget {
   final String? agentId;
@@ -37,14 +36,19 @@ class _EditAgentPageState extends State<EditAgentPage> {
 
   FaceColor _faceColor = FaceColor.white;
   EyeShape _eyeShape = EyeShape.roundedSquares;
-  String? _faceImageId;
   String? _customFaceId;
   FaceType _faceType = FaceType.robot;
   bool _isEditingCustomFaces = false;
   List<CustomFace> _customFaces = [];
   String? _aiServiceId;
   String _voice = 'Alloy';
+  String _voiceMode = 'turn_taking';
   String _personalityId = 'default_home';
+
+  // Voice options based on mode
+  static const List<String> turnTakingVoices = ['Alloy', 'Echo', 'Fable', 'Nova', 'Onyx', 'Shimmer'];
+  static const List<String> realtimeVoices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'];
+  List<String> get voiceOptions => _voiceMode == 'realtime' ? realtimeVoices : turnTakingVoices;
   String _introMessage = 'Hello {username}, it\'s me {agent_name} your personal AI Agent. How can I help you?';
   bool _showFaceGenerator = false;
 
@@ -77,18 +81,18 @@ class _EditAgentPageState extends State<EditAgentPage> {
         setState(() {
           _faceColor = agent.faceColor;
           _eyeShape = agent.eyeShape;
-          _faceImageId = agent.faceImageId;
           _customFaceId = agent.customFaceId;
           // Determine face type based on which ID is set
           if (agent.customFaceId != null) {
             _faceType = FaceType.custom;
-          } else if (agent.faceImageId != null) {
-            _faceType = FaceType.animal;
           } else {
             _faceType = FaceType.robot;
           }
-          _aiServiceId = agent.aiServiceId;
-          _voice = agent.voice;
+          _aiServiceId = 'openai_default'; // Always use OpenAI (migration from old services)
+          _voiceMode = agent.voiceMode;
+          // Ensure voice is valid for the mode
+          final validVoices = _voiceMode == 'realtime' ? realtimeVoices : turnTakingVoices;
+          _voice = validVoices.contains(agent.voice) ? agent.voice : validVoices.first;
           _personalityId = agent.personalityId;
           _introMessage = agent.introMessage;
         });
@@ -96,7 +100,7 @@ class _EditAgentPageState extends State<EditAgentPage> {
     } else {
       _nameController.text = 'New Agent';
       _introController.text = _introMessage;
-      _aiServiceId = context.read<AIServiceProvider>().dreamCloudService?.id;
+      _aiServiceId = 'openai_default';
     }
   }
 
@@ -125,10 +129,6 @@ class _EditAgentPageState extends State<EditAgentPage> {
         clearFaceImageId = true;
         clearCustomFaceId = true;
         break;
-      case FaceType.animal:
-        faceImageId = _faceImageId;
-        clearCustomFaceId = true;
-        break;
       case FaceType.custom:
         customFaceId = _customFaceId;
         clearFaceImageId = true;
@@ -142,8 +142,9 @@ class _EditAgentPageState extends State<EditAgentPage> {
         eyeShape: _eyeShape,
         faceImageId: faceImageId,
         customFaceId: customFaceId,
-        aiServiceId: _aiServiceId ?? 'dream_cloud_default',
+        aiServiceId: _aiServiceId ?? 'openai_default',
         voice: _voice,
+        voiceMode: _voiceMode,
         personalityId: _personalityId,
         introMessage: _introController.text.trim(),
       );
@@ -159,6 +160,7 @@ class _EditAgentPageState extends State<EditAgentPage> {
         clearCustomFaceId: clearCustomFaceId,
         aiServiceId: _aiServiceId,
         voice: _voice,
+        voiceMode: _voiceMode,
         personalityId: _personalityId,
         introMessage: _introController.text.trim(),
       );
@@ -282,7 +284,7 @@ class _EditAgentPageState extends State<EditAgentPage> {
                 child: FacePreview(
                   faceColor: _faceColor,
                   eyeShape: _eyeShape,
-                  faceImageId: _faceType == FaceType.animal ? _faceImageId : null,
+                  faceImageId: null,
                   customFaceId: _faceType == FaceType.custom ? _customFaceId : null,
                   size: 160,
                 ),
@@ -319,19 +321,6 @@ class _EditAgentPageState extends State<EditAgentPage> {
                       const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: _FaceTypeButton(
-                          label: 'Animal',
-                          isSelected: _faceType == FaceType.animal,
-                          onTap: () {
-                            setState(() {
-                              _faceType = FaceType.animal;
-                              _isEditingCustomFaces = false;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: _FaceTypeButton(
                           label: 'Custom',
                           isSelected: _faceType == FaceType.custom,
                           onTap: () {
@@ -343,32 +332,6 @@ class _EditAgentPageState extends State<EditAgentPage> {
                       ),
                     ],
                   ),
-                  // Animal faces grid
-                  if (_faceType == FaceType.animal) ...[
-                    const SizedBox(height: AppSpacing.md),
-                    Consumer<FaceImageProvider>(
-                      builder: (context, faceImageProvider, _) {
-                        final faceImages = faceImageProvider.faceImages;
-                        if (faceImages.isEmpty) {
-                          return const Center(
-                            child: Text(
-                              'No animal faces available',
-                              style: AppTextStyles.bodySmall,
-                            ),
-                          );
-                        }
-                        return _FaceImageGrid(
-                          faceImages: faceImages,
-                          selectedId: _faceImageId,
-                          onSelect: (id) {
-                            setState(() {
-                              _faceImageId = id;
-                            });
-                          },
-                        );
-                      },
-                    ),
-                  ],
                   // Custom faces grid
                   if (_faceType == FaceType.custom) ...[
                     const SizedBox(height: AppSpacing.md),
@@ -522,60 +485,51 @@ class _EditAgentPageState extends State<EditAgentPage> {
                     const SizedBox(height: AppSpacing.md),
                   ],
 
-                  // AI Service
-                  Consumer<AIServiceProvider>(
-                    builder: (context, aiProvider, _) {
-                      return AppDropdown<String>(
-                        label: 'AI Service',
-                        value: _aiServiceId,
-                        items: aiProvider.services.map((service) {
-                          return DropdownMenuItem(
-                            value: service.id,
-                            child: Text(service.displayName),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() {
-                              _aiServiceId = value;
-                              // Update voice to first available for new service
-                              final voices = aiProvider.getVoicesForService(value);
-                              if (voices.isNotEmpty && !voices.contains(_voice)) {
-                                _voice = voices.first;
-                              }
-                            });
-                          }
-                        },
-                      );
+
+                  // Voice Mode Dropdown (before Voice so voice list updates first)
+                  AppDropdown<String>(
+                    label: 'Voice Mode',
+                    value: _voiceMode,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'turn_taking',
+                        child: Text('Turn-taking'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'realtime',
+                        child: Text('Realtime'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _voiceMode = value;
+                          // Always reset to first voice in new mode to avoid case mismatch
+                          _voice = value == 'realtime' ? realtimeVoices.first : turnTakingVoices.first;
+                        });
+                      }
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
 
                   // Voice
-                  Consumer<AIServiceProvider>(
-                    builder: (context, aiProvider, _) {
-                      final voices = _aiServiceId != null 
-                          ? aiProvider.getVoicesForService(_aiServiceId!)
-                          : <String>[];
-                      return AppDropdown<String>(
-                        label: 'Voice',
-                        value: voices.contains(_voice) ? _voice : voices.firstOrNull,
-                        items: voices.map((voice) {
-                          return DropdownMenuItem(
-                            value: voice,
-                            child: Text(voice),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _voice = value);
-                          }
-                        },
+                  AppDropdown<String>(
+                    label: 'Voice',
+                    value: _voice,
+                    items: voiceOptions.map((voice) {
+                      return DropdownMenuItem(
+                        value: voice,
+                        child: Text(voice),
                       );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _voice = value);
+                      }
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  
+
                   // Intro Message
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -765,84 +719,6 @@ class _FaceTypeButton extends StatelessWidget {
           style: AppTextStyles.bodyMedium.copyWith(
             color: isSelected ? AppColors.dreamCloudBlue : AppColors.textPrimary,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FaceImageGrid extends StatelessWidget {
-  final List<FaceImage> faceImages;
-  final String? selectedId;
-  final void Function(String) onSelect;
-
-  const _FaceImageGrid({
-    required this.faceImages,
-    required this.selectedId,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        crossAxisSpacing: AppSpacing.sm,
-        mainAxisSpacing: AppSpacing.sm,
-        childAspectRatio: 1,
-      ),
-      itemCount: faceImages.length,
-      itemBuilder: (context, index) {
-        final face = faceImages[index];
-        final isSelected = face.id == selectedId;
-        final localPath = ImageCacheService.getFaceLocalPath(face.imageUrl);
-
-        return GestureDetector(
-          onTap: () => onSelect(face.id),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.faceBackground,
-              borderRadius: BorderRadius.circular(AppBorderRadius.small),
-              border: Border.all(
-                color: isSelected ? AppColors.dreamCloudBlue : AppColors.divider,
-                width: isSelected ? 3 : 1,
-              ),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppBorderRadius.small - 2),
-              child: localPath != null
-                  ? Image.file(
-                      File(localPath),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _buildPlaceholder(face.name),
-                    )
-                  : face.imageUrl.isNotEmpty
-                      ? Image.network(
-                          face.imageUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _buildPlaceholder(face.name),
-                        )
-                      : _buildPlaceholder(face.name),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildPlaceholder(String name) {
-    return Container(
-      color: Colors.grey.shade300,
-      child: Center(
-        child: Text(
-          name[0].toUpperCase(),
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
           ),
         ),
       ),

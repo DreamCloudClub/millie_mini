@@ -5,14 +5,14 @@
  * 
  * Priority order:
  * 1. Checks for "holder" role (crypto holder access)
- * 2. Checks for active SUMO subscriptions by product ID (8206 = basic, 8209 = pro)
+ * 2. Checks for active SUMO subscriptions by product ID (9243 = lite, 8206 = basic, 8209 = pro)
  * 3. Falls back to inactive if no active subscription found
  * 
  * Install via Code Snippets plugin or functions.php
  * 
  * Endpoint: POST /wp-json/dreamcloud/v1/check-subscription
  * Body: { "email": "user@example.com" }
- * Response: { "active": true/false, "status": "holder|basic|pro|inactive|notFound", "message": "..." }
+ * Response: { "active": true/false, "status": "holder|lite|basic|pro|inactive|notFound", "message": "..." }
  */
 
 add_action('rest_api_init', function() {
@@ -83,8 +83,8 @@ function dreamcloud_check_subscription($request) {
 
 /**
  * Check for active SUMO subscription by user ID
- * Returns subscription status based on product ID (8206 = basic, 8209 = pro)
- * 
+ * Returns subscription status based on product ID (9243 = lite, 8206 = basic, 8209 = pro)
+ *
  * This function queries the SUMO subscriptions database table directly,
  * which is more reliable than querying WordPress posts/meta.
  */
@@ -173,7 +173,19 @@ function check_sumo_subscription_by_user($user_id) {
                 
                 if (!empty($product_ids)) {
                     $product_ids = array_map('intval', $product_ids);
-                    
+
+                    // Pro – product ID 8209 (check first - highest tier)
+                    if (in_array(8209, $product_ids, true)) {
+                        error_log("SUMO CHECK: ✓ Returning PRO status for user $user_id");
+                        return new WP_REST_Response(array(
+                            'active' => true,
+                            'status' => 'pro',
+                            'message' => 'Pro subscription active',
+                            'product_id' => 8209,
+                            'user_id' => $user_id,
+                        ), 200);
+                    }
+
                     // Basic – product ID 8206
                     if (in_array(8206, $product_ids, true)) {
                         error_log("SUMO CHECK: ✓ Returning BASIC status for user $user_id");
@@ -185,21 +197,21 @@ function check_sumo_subscription_by_user($user_id) {
                             'user_id' => $user_id,
                         ), 200);
                     }
-                    
-                    // Pro – product ID 8209
-                    if (in_array(8209, $product_ids, true)) {
-                        error_log("SUMO CHECK: ✓ Returning PRO status for user $user_id");
+
+                    // Lite – product ID 9243
+                    if (in_array(9243, $product_ids, true)) {
+                        error_log("SUMO CHECK: ✓ Returning LITE status for user $user_id");
                         return new WP_REST_Response(array(
                             'active' => true,
-                            'status' => 'pro',
-                            'message' => 'Pro subscription active',
-                            'product_id' => 8209,
+                            'status' => 'lite',
+                            'message' => 'Lite subscription active',
+                            'product_id' => 9243,
                             'user_id' => $user_id,
                         ), 200);
                     }
-                    
+
                     // Some other active SUMO subscription that isn't mapped
-                    error_log("SUMO CHECK: Found active subscription with product IDs: " . implode(', ', $product_ids) . " but none match 8206 or 8209");
+                    error_log("SUMO CHECK: Found active subscription with product IDs: " . implode(', ', $product_ids) . " but none match 9243, 8206 or 8209");
                     return new WP_REST_Response(array(
                         'active' => true,
                         'status' => 'active_other',
@@ -243,20 +255,30 @@ function check_sumo_subscription_by_user($user_id) {
             
             foreach ($items as $item) {
                 $product_id = $item->get_variation_id() ? $item->get_variation_id() : $item->get_product_id();
-                
-                // Check if this is product 8206 or 8209
-                if ($product_id == 8206 || $product_id == 8209) {
+
+                // Check if this is product 9243, 8206 or 8209
+                if ($product_id == 9243 || $product_id == 8206 || $product_id == 8209) {
                     // Check if order/subscription is active
                     $subscription_status = $order->get_meta('_subscription_status');
                     $order_status = $order->get_status();
-                    
+
                     error_log("SUMO CHECK: Found product $product_id in order $order_id, subscription status: $subscription_status, order status: $order_status");
-                    
+
                     // If subscription status is active, or order is completed/processing
-                    if ($subscription_status === 'active' || 
+                    if ($subscription_status === 'active' ||
                         in_array($order_status, array('completed', 'processing', 'wc-completed', 'wc-processing'))) {
-                        
-                        if ($product_id == 8206) {
+
+                        if ($product_id == 8209) {
+                            error_log("SUMO CHECK: ✓ Returning PRO status from order $order_id");
+                            return new WP_REST_Response(array(
+                                'active' => true,
+                                'status' => 'pro',
+                                'message' => 'Pro subscription active',
+                                'product_id' => $product_id,
+                                'order_id' => $order_id,
+                                'user_id' => $user_id,
+                            ), 200);
+                        } elseif ($product_id == 8206) {
                             error_log("SUMO CHECK: ✓ Returning BASIC status from order $order_id");
                             return new WP_REST_Response(array(
                                 'active' => true,
@@ -266,12 +288,12 @@ function check_sumo_subscription_by_user($user_id) {
                                 'order_id' => $order_id,
                                 'user_id' => $user_id,
                             ), 200);
-                        } elseif ($product_id == 8209) {
-                            error_log("SUMO CHECK: ✓ Returning PRO status from order $order_id");
+                        } elseif ($product_id == 9243) {
+                            error_log("SUMO CHECK: ✓ Returning LITE status from order $order_id");
                             return new WP_REST_Response(array(
                                 'active' => true,
-                                'status' => 'pro',
-                                'message' => 'Pro subscription active',
+                                'status' => 'lite',
+                                'message' => 'Lite subscription active',
                                 'product_id' => $product_id,
                                 'order_id' => $order_id,
                                 'user_id' => $user_id,

@@ -14,10 +14,7 @@ dependencies:
   
   # State Management
   provider: ^6.1.2
-  
-  # Supabase
-  supabase_flutter: ^2.8.0
-  
+
   # Local Storage
   shared_preferences: ^2.3.3
   flutter_secure_storage: ^9.2.2
@@ -26,6 +23,7 @@ dependencies:
   record: ^6.0.0
   audioplayers: ^6.1.0
   permission_handler: ^11.3.1
+  flutter_sound: ^9.16.3
   
   # HTTP & API
   http: ^1.2.2
@@ -46,9 +44,6 @@ dependencies:
   # Image Saver
   gal: ^2.3.0
 
-  # SVG Rendering (for Geography maps)
-  flutter_svg: ^2.0.10+1
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -63,10 +58,6 @@ flutter:
     - assets/icon/icon.png
     - assets/icon/logo.png
     - assets/shapes/
-    - assets/data/
-    - assets/svg/
-    - assets/svg/states/
-    - assets/images/flags/
 
 # App Icon Configuration
 flutter_launcher_icons:

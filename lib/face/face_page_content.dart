@@ -5,8 +5,6 @@ import '../providers/providers.dart';
 import '../models/models.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
-import '../services/services.dart';
-import '../services/image_cache_service.dart';
 import 'face_eyes.dart';
 import 'face_mouth.dart';
 import 'control_bar.dart';
@@ -15,9 +13,7 @@ import 'control_bar.dart';
 /// Session management is handled by the parent ConversationPage
 class FacePageContent extends StatefulWidget {
   final VoidCallback onExit;
-  final VoidCallback onNavigateToGame;
   final VoidCallback onNavigateToChat;
-  final VoidCallback onNavigateToReports;
   final VoidCallback onNavigateToNotes;
   final VoidCallback onNavigateToSchedule;
   final Future<void> Function() onRefreshSession;
@@ -25,9 +21,7 @@ class FacePageContent extends StatefulWidget {
   const FacePageContent({
     super.key,
     required this.onExit,
-    required this.onNavigateToGame,
     required this.onNavigateToChat,
-    required this.onNavigateToReports,
     required this.onNavigateToNotes,
     required this.onNavigateToSchedule,
     required this.onRefreshSession,
@@ -57,7 +51,8 @@ class _FacePageContentState extends State<FacePageContent> {
         // If in sleep or paused state, wake up/resume
         if (voiceProvider.state == VoiceState.sleep ||
             voiceProvider.state == VoiceState.paused) {
-          debugPrint('Double tap detected in ${voiceProvider.state} - waking up/resuming');
+          debugPrint(
+              'Double tap detected in ${voiceProvider.state} - waking up/resuming');
           await voiceProvider.resume();
           return;
         }
@@ -106,92 +101,18 @@ class _FacePageContentState extends State<FacePageContent> {
 
     final agentProvider = context.read<AgentProvider>();
     final voiceProvider = context.read<VoiceProvider>();
-    final aiServiceProvider = context.read<AIServiceProvider>();
     final agent = agentProvider.activeAgent;
 
     if (agent != null) {
-      final aiService = aiServiceProvider.getServiceById(agent.aiServiceId);
-      final subscriptionStatus = aiService?.isDreamCloud == true
-          ? aiServiceProvider.dreamCloudService?.status
-          : null;
-
-      final authProvider = context.read<AuthProvider>();
-      final userId = authProvider.userProfile?.id;
-      final userEmail = authProvider.userProfile?.email;
-
-      // Check usage limit if using Dream Cloud AI
-      if (aiService != null &&
-          aiService.isDreamCloud &&
-          subscriptionStatus != null &&
-          subscriptionStatus.isUsable &&
-          userId != null &&
-          userEmail != null) {
-        try {
-          final usageInfo = await UsageTrackingService.getCurrentUsage(
-            userId,
-            userEmail: userEmail,
-            subscriptionStatus: subscriptionStatus,
-          );
-
-          final tokensUsed = usageInfo['tokens_used'] as int? ?? 0;
-          final tokenLimit = usageInfo['token_limit'] as int? ?? 0;
-          final tokensRemaining = usageInfo['tokens_remaining'] as int? ?? 0;
-
-          if (tokenLimit > 0 && (tokensRemaining <= 0 || tokensUsed >= tokenLimit)) {
-            final subscriptionTier = _getSubscriptionTierName(subscriptionStatus);
-            if (mounted) {
-              showDialog(
-                context: context,
-                builder: (context) => UsageLimitModal(
-                  tokensUsed: tokensUsed,
-                  tokenLimit: tokenLimit,
-                  subscriptionTier: subscriptionTier,
-                ),
-              );
-            }
-            return;
-          }
-        } catch (e) {
-          debugPrint('Error checking usage limit (allowing refresh): $e');
-        }
-      }
-
       await voiceProvider.refreshSession(agent.id);
       await Future.delayed(const Duration(milliseconds: 500));
       await widget.onRefreshSession();
     }
   }
 
-  String _getSubscriptionTierName(AIServiceStatus status) {
-    switch (status) {
-      case AIServiceStatus.holder:
-        return 'Holder';
-      case AIServiceStatus.basic:
-        return 'Basic';
-      case AIServiceStatus.pro:
-        return 'Pro';
-      case AIServiceStatus.active:
-        return 'Active';
-      case AIServiceStatus.trial:
-        return 'Trial';
-      default:
-        return 'Subscription';
-    }
-  }
-
-  void _handleNavigateToGame() {
-    _hideControlBar();
-    widget.onNavigateToGame();
-  }
-
   void _handleNavigateToChat() {
     _hideControlBar();
     widget.onNavigateToChat();
-  }
-
-  void _handleNavigateToReports() {
-    _hideControlBar();
-    widget.onNavigateToReports();
   }
 
   void _handleNavigateToNotes() {
@@ -202,106 +123,6 @@ class _FacePageContentState extends State<FacePageContent> {
   void _handleNavigateToSchedule() {
     _hideControlBar();
     widget.onNavigateToSchedule();
-  }
-
-  Widget _buildFaceImageContent(
-    BuildContext context,
-    Agent agent,
-    VoiceProvider voiceProvider,
-    double screenW,
-    double screenH,
-  ) {
-    final faceImageProvider = context.read<FaceImageProvider>();
-    final faceImage = faceImageProvider.getById(agent.faceImageId);
-
-    if (faceImage == null) {
-      // Fallback to robot face if image not found
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Spacer(flex: 1),
-          FaceEyes(
-            faceColor: agent.faceColor,
-            eyeShape: agent.eyeShape,
-            faceState: voiceProvider.faceState,
-            screenWidth: screenW,
-            screenHeight: screenH,
-          ),
-          SizedBox(height: screenH * 0.12),
-          FaceMouth(
-            faceState: voiceProvider.faceState,
-            screenWidth: screenW,
-            faceColor: agent.faceColor,
-          ),
-          const Spacer(flex: 1),
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-            child: Text(
-              voiceProvider.state.statusText,
-              style: TextStyle(
-                fontFamily: AppTextStyles.fontFamily,
-                fontSize: 14,
-                color: Colors.white.withOpacity(0.5),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    final localPath = ImageCacheService.getFaceLocalPath(faceImage.imageUrl);
-
-    return Stack(
-      children: [
-        // Full screen face image
-        Positioned.fill(
-          child: localPath != null
-              ? Image.file(
-                  File(localPath),
-                  fit: BoxFit.cover,
-                  alignment: Alignment.topCenter,
-                  errorBuilder: (_, __, ___) => _buildFallbackImage(screenW),
-                )
-              : faceImage.imageUrl.isNotEmpty
-                  ? Image.network(
-                      faceImage.imageUrl,
-                      fit: BoxFit.cover,
-                      alignment: Alignment.topCenter,
-                      errorBuilder: (_, __, ___) => _buildFallbackImage(screenW),
-                    )
-                  : _buildFallbackImage(screenW),
-        ),
-
-        // Status text at bottom
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: AppSpacing.lg,
-          child: Text(
-            voiceProvider.state.statusText,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontFamily: AppTextStyles.fontFamily,
-              fontSize: 14,
-              color: Colors.white.withOpacity(0.5),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFallbackImage(double size) {
-    return Container(
-      width: size,
-      height: size,
-      color: Colors.grey.shade800,
-      child: const Icon(
-        Icons.pets,
-        color: Colors.white54,
-        size: 80,
-      ),
-    );
   }
 
   Widget _buildCustomFaceContent(
@@ -418,17 +239,6 @@ class _FacePageContentState extends State<FacePageContent> {
                   );
                 }
 
-                // Check if agent uses a face image (animal face from Supabase)
-                if (agent.usesFaceImage) {
-                  return _buildFaceImageContent(
-                    context,
-                    agent,
-                    voiceProvider,
-                    screenW,
-                    screenH,
-                  );
-                }
-
                 // Default robot face
                 return Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -491,9 +301,7 @@ class _FacePageContentState extends State<FacePageContent> {
                     SafeArea(
                       bottom: false,
                       child: _TopNavBar(
-                        onNavigateToGame: _handleNavigateToGame,
                         onNavigateToChat: _handleNavigateToChat,
-                        onNavigateToReports: _handleNavigateToReports,
                         onNavigateToNotes: _handleNavigateToNotes,
                         onNavigateToSchedule: _handleNavigateToSchedule,
                       ),
@@ -521,16 +329,12 @@ class _FacePageContentState extends State<FacePageContent> {
 
 /// Top navigation bar matching bottom control bar style
 class _TopNavBar extends StatelessWidget {
-  final VoidCallback onNavigateToGame;
   final VoidCallback onNavigateToChat;
-  final VoidCallback onNavigateToReports;
   final VoidCallback onNavigateToNotes;
   final VoidCallback onNavigateToSchedule;
 
   const _TopNavBar({
-    required this.onNavigateToGame,
     required this.onNavigateToChat,
-    required this.onNavigateToReports,
     required this.onNavigateToNotes,
     required this.onNavigateToSchedule,
   });
@@ -558,19 +362,9 @@ class _TopNavBar extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _NavButton(
-            icon: Icons.mood_outlined,
-            label: 'Games',
-            onTap: onNavigateToGame,
-          ),
-          _NavButton(
             icon: Icons.chat_bubble_outline,
             label: 'Chat',
             onTap: onNavigateToChat,
-          ),
-          _NavButton(
-            icon: Icons.article_outlined,
-            label: 'Reports',
-            onTap: onNavigateToReports,
           ),
           _NavButton(
             icon: Icons.note_alt_outlined,
@@ -635,4 +429,3 @@ class _NavButton extends StatelessWidget {
     );
   }
 }
-

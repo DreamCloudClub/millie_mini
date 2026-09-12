@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
 import '../providers/reminder_provider.dart';
-import '../providers/reports_provider.dart';
 import 'app_launcher_service.dart';
 import 'intent_router.dart';
 import 'notes_service.dart';
@@ -63,9 +62,6 @@ enum AINavigationTarget {
   imageGenerator, // Chat page in image mode
   face,
   schedule, // Schedule/alerts page
-  game, // Game display page
-  reports, // AI Reports page
-  reportView, // Single report view
 }
 
 /// Unified handler for AI operations via function calling (notes + schedule + weather + reports)
@@ -76,8 +72,6 @@ class NoteToolsHandler {
   // Weather service for weather queries
   WeatherService? _weatherService;
 
-  // Reports provider for AI reports
-  ReportsProvider? _reportsProvider;
 
   // Track the currently active/open note
   Note? _activeNote;
@@ -98,10 +92,6 @@ class NoteToolsHandler {
     _weatherService = service;
   }
 
-  /// Set the reports provider (injected from VoiceProvider)
-  void setReportsProvider(ReportsProvider provider) {
-    _reportsProvider = provider;
-  }
   
   /// Callback when active note changes (for UI updates)
   Function(Note?)? onActiveNoteChanged;
@@ -139,25 +129,6 @@ class NoteToolsHandler {
 
   /// Callback when schedule list should be refreshed (create, update, delete)
   VoidCallback? onScheduleListChanged;
-
-  /// Callback when reports list should be refreshed
-  VoidCallback? onReportsListChanged;
-
-  /// Callback to trigger report check-in after navigating to reports
-  /// [skipIntro] - pass true when coming from voice nav (already talking)
-  void Function({bool skipIntro})? onTriggerReportCheckIn;
-
-  /// Callback to change report filter (Live, History, Saved)
-  void Function(String filter)? onSetReportFilter;
-
-  /// Callback to change report category
-  void Function(String? category)? onSetReportCategory;
-
-  /// Callback to start lesson mode (FSM-controlled)
-  Future<void> Function(String category)? onStartLessonMode;
-
-  /// Callback to exit lesson mode
-  Future<void> Function()? onExitLessonMode;
 
   /// Callback to refresh/wipe session (clear conversation context)
   Future<void> Function()? onRefreshSession;
@@ -770,11 +741,13 @@ class NoteToolsHandler {
       case 'show_schedule':
         return _showSchedule();
       case 'show_games':
-        return _showGames();
       case 'start_lesson_mode':
-        return await _startLessonMode(toolCall.arguments);
       case 'exit_lesson_mode':
-        return await _exitLessonMode();
+        // Games/lessons removed
+        return NoteToolResult(
+          success: true,
+          message: 'Games and lessons are not available in this version.',
+        );
       case 'close_note':
         return _closeNote();
       case 'delete_note':
@@ -798,17 +771,6 @@ class NoteToolsHandler {
       // App launcher
       case 'open_app':
         return await _openApp(toolCall.arguments);
-      // Reports tools
-      case 'show_reports':
-        return _showReports();
-      case 'read_report':
-        return await _readReport(toolCall.arguments);
-      case 'save_report':
-        return await _saveReport(toolCall.arguments);
-      case 'set_report_filter':
-        return _setReportFilter(toolCall.arguments);
-      case 'set_report_category':
-        return _setReportCategory(toolCall.arguments);
       // Capability request (triggers retry with requested tools)
       case 'request_capability':
         return _requestCapability(toolCall.arguments);
@@ -1185,73 +1147,6 @@ class NoteToolsHandler {
     );
   }
 
-  /// Navigate to the games page
-  NoteToolResult _showGames() {
-    // Navigate to game page - user taps a category button to start
-    onNavigate?.call(AINavigationTarget.game);
-
-    // Pause after response plays - manual selection until game starts
-    _shouldPauseAfterResponse = true;
-
-    return NoteToolResult(
-      success: true,
-      message: 'Here are the games. Tap a category to start!',
-    );
-  }
-
-  /// Navigate to games page for user to select and start a game
-  /// Does NOT start the game - just opens the menu and refreshes session
-  Future<NoteToolResult> _startLessonMode(Map<String, dynamic> args) async {
-    final category = args['category'] as String?;
-
-    debugPrint('NoteToolsHandler: Navigating to games page (category hint: $category)');
-
-    // Navigate to game page
-    onNavigate?.call(AINavigationTarget.game);
-
-    // Pause after response plays - clean handoff to game AI
-    _shouldPauseAfterResponse = true;
-
-    // Build a friendly response based on category
-    String message;
-    if (category == 'riddle') {
-      message = 'Here are the games! Tap Riddles and press play when you\'re ready.';
-    } else if (category == 'joke') {
-      message = 'Here are the games! Tap Jokes and press play when you\'re ready.';
-    } else if (category == 'trivia') {
-      message = 'Here are the games! Tap Trivia and press play when you\'re ready.';
-    } else if (category == 'spelling') {
-      message = 'Here are the games! Tap Spelling and press play when you\'re ready.';
-    } else if (category == 'math') {
-      message = 'Here are the games! Tap Math and press play when you\'re ready.';
-    } else {
-      message = 'Here are the games! Pick one and press play when you\'re ready.';
-    }
-
-    return NoteToolResult(
-      success: true,
-      message: message,
-    );
-  }
-
-  /// Exit lesson mode
-  Future<NoteToolResult> _exitLessonMode() async {
-    debugPrint('NoteToolsHandler: Exiting lesson mode');
-
-    if (onExitLessonMode != null) {
-      await onExitLessonMode!();
-
-      return NoteToolResult(
-        success: true,
-        message: 'Lesson mode ended.',
-      );
-    } else {
-      return NoteToolResult(
-        success: true,
-        message: 'Not in lesson mode.',
-      );
-    }
-  }
 
   NoteToolResult _closeNote() {
     if (_activeNote == null) {
@@ -1874,166 +1769,6 @@ class NoteToolsHandler {
       success: true,
       message: 'Loading $capability tools...',
       requestedCapability: capability,
-    );
-  }
-
-  // ===== REPORTS METHODS =====
-
-  /// Navigate to the AI Reports page
-  AIToolResult _showReports() {
-    onNavigate?.call(AINavigationTarget.reports);
-
-    // Trigger report check-in after a short delay for navigation
-    // skipIntro: true because we're already in a voice conversation
-    if (onTriggerReportCheckIn != null) {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        onTriggerReportCheckIn!(skipIntro: true);
-      });
-    }
-
-    // Pause so the check-in can take over
-    _shouldPauseAfterResponse = true;
-
-    return AIToolResult(
-      success: true,
-      message: 'Opening your reports now.',
-    );
-  }
-
-  /// Read the full content of a report ("tell me more")
-  Future<AIToolResult> _readReport(Map<String, dynamic> args) async {
-    if (_reportsProvider == null) {
-      return AIToolResult(
-        success: false,
-        message: 'Reports system not available.',
-      );
-    }
-
-    final reportId = args['report_id'] as String?;
-
-    // Get the report - either by ID or the most recently announced one
-    Report? report;
-    if (reportId != null && reportId.isNotEmpty) {
-      report = await _reportsProvider!.getReport(reportId);
-    } else {
-      // Get the most recently announced report
-      report = _reportsProvider!.lastAnnouncedReport;
-    }
-
-    if (report == null) {
-      return AIToolResult(
-        success: false,
-        message: 'I don\'t have a recent report to tell you about. Would you like me to check for new reports?',
-      );
-    }
-
-    // Return the full content for TTS
-    return AIToolResult(
-      success: true,
-      message: report.content,
-    );
-  }
-
-  /// Save a report to prevent auto-deletion
-  Future<AIToolResult> _saveReport(Map<String, dynamic> args) async {
-    if (_reportsProvider == null) {
-      return AIToolResult(
-        success: false,
-        message: 'Reports system not available.',
-      );
-    }
-
-    final reportId = args['report_id'] as String?;
-
-    // Get the report ID - either provided or from the most recently announced one
-    String? idToSave = reportId;
-    if (idToSave == null || idToSave.isEmpty) {
-      final lastReport = _reportsProvider!.lastAnnouncedReport;
-      if (lastReport != null) {
-        idToSave = lastReport.id;
-      }
-    }
-
-    if (idToSave == null) {
-      return AIToolResult(
-        success: false,
-        message: 'I don\'t have a recent report to save. Would you like me to show your reports?',
-      );
-    }
-
-    final success = await _reportsProvider!.saveReport(idToSave);
-
-    if (success) {
-      onReportsListChanged?.call();
-      return AIToolResult(
-        success: true,
-        message: 'I\'ve saved that report for you. It won\'t be deleted automatically now.',
-      );
-    } else {
-      return AIToolResult(
-        success: false,
-        message: 'Failed to save the report. Please try again.',
-      );
-    }
-  }
-
-  /// Set report filter (Live, History, Saved)
-  AIToolResult _setReportFilter(Map<String, dynamic> args) {
-    final filter = args['filter'] as String? ?? 'live';
-
-    // Navigate to reports if not already there
-    onNavigate?.call(AINavigationTarget.reports);
-
-    // Directly call the filter change callback
-    onSetReportFilter?.call(filter.toLowerCase());
-
-    final filterLabel = switch (filter.toLowerCase()) {
-      'live' => 'Live',
-      'history' => 'History',
-      'saved' => 'Saved',
-      _ => 'Live',
-    };
-
-    // Trigger check-in after filter change (skipIntro since we're in conversation)
-    if (onTriggerReportCheckIn != null) {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        onTriggerReportCheckIn!(skipIntro: true);
-      });
-    }
-    _shouldPauseAfterResponse = true;
-
-    return AIToolResult(
-      success: true,
-      message: 'Switching to $filterLabel reports.',
-    );
-  }
-
-  /// Set report category filter (All, Technology, etc.)
-  AIToolResult _setReportCategory(Map<String, dynamic> args) {
-    final category = args['category'] as String? ?? 'all';
-
-    // Navigate to reports if not already there
-    onNavigate?.call(AINavigationTarget.reports);
-
-    // Directly call the category change callback
-    final categoryValue = category.toLowerCase() == 'all' ? null : category;
-    onSetReportCategory?.call(categoryValue);
-
-    final categoryLabel = category.toLowerCase() == 'all'
-        ? 'all categories'
-        : category;
-
-    // Trigger check-in after category change (skipIntro since we're in conversation)
-    if (onTriggerReportCheckIn != null) {
-      Future.delayed(const Duration(milliseconds: 300), () {
-        onTriggerReportCheckIn!(skipIntro: true);
-      });
-    }
-    _shouldPauseAfterResponse = true;
-
-    return AIToolResult(
-      success: true,
-      message: 'Showing $categoryLabel.',
     );
   }
 

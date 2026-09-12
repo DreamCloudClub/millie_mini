@@ -282,7 +282,7 @@ class _BrainSettingsPageState extends State<BrainSettingsPage> {
         title: const Padding(
           padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
           child: Text(
-            'Brain Settings',
+            'Open Claw',
             style: AppTextStyles.heading2,
           ),
         ),

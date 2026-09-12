@@ -3,19 +3,12 @@ import 'package:provider/provider.dart';
 import '../utils/constants.dart';
 import '../providers/providers.dart';
 import '../models/models.dart';
-import '../game/lesson_phase.dart';
 
 class ControlBar extends StatelessWidget {
   final VoidCallback onPause;
   final VoidCallback onPlay;
   final VoidCallback onRefresh;
   final VoidCallback onExit;
-  final VoidCallback? onSkip;
-  final VoidCallback? onStart;
-  final VoidCallback? onGamePause;
-  final VoidCallback? onGameResume;
-  final VoidCallback? onRecord;
-  final bool useSkipAsExit;
 
   const ControlBar({
     super.key,
@@ -23,12 +16,6 @@ class ControlBar extends StatelessWidget {
     required this.onPlay,
     required this.onRefresh,
     required this.onExit,
-    this.onSkip,
-    this.onStart,
-    this.onGamePause,
-    this.onGameResume,
-    this.onRecord,
-    this.useSkipAsExit = false,
   });
 
   @override
@@ -36,13 +23,6 @@ class ControlBar extends StatelessWidget {
     return Consumer<VoiceProvider>(
       builder: (context, voiceProvider, _) {
         final isPaused = voiceProvider.isPaused;
-        final isGameSelected = voiceProvider.isGameSelected;
-        final isGameRunning = voiceProvider.isGameRunning;
-        final isGamePaused = voiceProvider.isGamePaused;
-        final gameController = voiceProvider.gameController;
-        final isWaitingForRecord = isGameRunning &&
-            !gameController.autoRecord &&
-            gameController.phase == LessonPhase.ask;
 
         return Container(
           margin: const EdgeInsets.only(
@@ -59,7 +39,7 @@ class ControlBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppBorderRadius.large),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.4),
+                color: Colors.black.withValues(alpha: 0.4),
                 blurRadius: 20,
                 offset: const Offset(0, 4),
               ),
@@ -68,102 +48,37 @@ class ControlBar extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              // First button: Skip (when game is running) or Refresh (on menu/other pages)
-              if (isGameRunning && onSkip != null)
+              // Refresh/Reset button
+              _ControlButton(
+                icon: Icons.refresh,
+                label: 'Reset',
+                onTap: onRefresh,
+                buttonColor: Colors.green,
+              ),
+
+              // Play/Pause button
+              if (!isPaused && voiceProvider.state != VoiceState.sleep)
                 _ControlButton(
-                  icon: Icons.skip_next,
-                  label: 'Skip',
-                  onTap: onSkip!,
-                  buttonColor: Colors.green,
+                  icon: Icons.pause,
+                  label: 'Pause',
+                  onTap: onPause,
+                  buttonColor: Colors.blue,
                 )
               else
                 _ControlButton(
-                  icon: Icons.refresh,
-                  label: 'Reset',
-                  onTap: onRefresh,
-                  buttonColor: Colors.green,
+                  icon: Icons.play_arrow,
+                  label: voiceProvider.state == VoiceState.sleep ? 'Wake' : 'Play',
+                  onTap: onPlay,
+                  buttonColor: Colors.blue,
                 ),
 
-              // Middle button: Start/Pause/Play/Record based on state
-              if (isGameSelected && onStart != null)
-                // Category selected, show Start button
-                _ControlButton(
-                  icon: Icons.play_arrow,
-                  label: 'Start',
-                  onTap: onStart!,
-                  buttonColor: Colors.blue,
-                )
-              else if (isWaitingForRecord && onRecord != null)
-                // Waiting for user to submit answer (auto-record off)
-                _ControlButton(
-                  icon: Icons.play_arrow,
-                  label: 'Answer',
-                  onTap: onRecord!,
-                  buttonColor: Colors.blue,
-                )
-              else if (isGameRunning)
-                // Game running - show Pause or Resume
-                if (isGamePaused && onGameResume != null)
-                  _ControlButton(
-                    icon: Icons.play_arrow,
-                    label: 'Play',
-                    onTap: onGameResume!,
-                    buttonColor: Colors.blue,
-                  )
-                else if (onGamePause != null)
-                  _ControlButton(
-                    icon: Icons.pause,
-                    label: 'Pause',
-                    onTap: onGamePause!,
-                    buttonColor: Colors.blue,
-                  )
-                else
-                  _ControlButton(
-                    icon: Icons.pause,
-                    label: 'Pause',
-                    onTap: onPause,
-                    buttonColor: Colors.blue,
-                  )
-              else if (onStart != null)
-                // On game page but no category selected - show Play (inactive)
-                _ControlButton(
-                  icon: Icons.play_arrow,
-                  label: 'Play',
-                  onTap: () {},
-                  buttonColor: Colors.blue,
-                )
-              else
-                // Normal conversation mode
-                if (!isPaused && voiceProvider.state != VoiceState.sleep)
-                  _ControlButton(
-                    icon: Icons.pause,
-                    label: 'Pause',
-                    onTap: onPause,
-                    buttonColor: Colors.blue,
-                  )
-                else
-                  _ControlButton(
-                    icon: Icons.play_arrow,
-                    label: voiceProvider.state == VoiceState.sleep ? 'Wake' : 'Play',
-                    onTap: onPlay,
-                    buttonColor: Colors.blue,
-                  ),
-
-              // Skip button (for reports) or Exit button
-              if (useSkipAsExit && onSkip != null)
-                _ControlButton(
-                  icon: Icons.skip_next,
-                  label: 'Skip',
-                  onTap: onSkip!,
-                  buttonColor: AppColors.primaryOrange,
-                )
-              else
-                _ControlButton(
-                  icon: Icons.close,
-                  label: 'Exit',
-                  onTap: onExit,
-                  buttonColor: AppColors.primaryOrange,
-                ),
+              // Exit button
+              _ControlButton(
+                icon: Icons.close,
+                label: 'Exit',
+                onTap: onExit,
+                buttonColor: AppColors.primaryOrange,
+              ),
             ],
           ),
         );
@@ -177,14 +92,12 @@ class _ControlButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final Color buttonColor;
-  final Color iconColor;
 
   const _ControlButton({
     required this.icon,
     required this.label,
     required this.onTap,
     required this.buttonColor,
-    this.iconColor = Colors.white,
   });
 
   @override
@@ -203,14 +116,14 @@ class _ControlButton extends StatelessWidget {
             ),
             child: Icon(
               icon,
-              color: iconColor,
+              color: Colors.white,
               size: 28,
             ),
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               fontFamily: AppTextStyles.fontFamily,
               fontSize: 12,
               fontWeight: FontWeight.w500,
@@ -222,4 +135,3 @@ class _ControlButton extends StatelessWidget {
     );
   }
 }
-

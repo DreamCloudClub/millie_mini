@@ -120,9 +120,8 @@ class StorageKeys {
   static const String activeAgentId = 'active_agent_id';
   static const String isLoggedIn = 'is_logged_in';
   static const String authToken = 'auth_token';
-  static const String porcupineAccessKey = 'porcupine_access_key';
-  static const String gameSettings = 'game_settings';
-  static const String reportsDisplaySize = 'reports_display_size';
+  static const String notes = 'notes';
+  static const String reminders = 'reminders';
   static const String openClawEnabled = 'openclaw_enabled';
   static const String openClawUrl = 'openclaw_url';
   static const String openClawToken = 'openclaw_token';

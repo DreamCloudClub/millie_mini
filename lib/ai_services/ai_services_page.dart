@@ -1,24 +1,116 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../providers/providers.dart';
-import '../models/models.dart';
 import '../utils/constants.dart';
 import '../widgets/widgets.dart';
-import '../services/services.dart';
-import '../services/supabase_service.dart';
+import '../services/openai_service.dart';
+import '../services/storage_service.dart';
 
-class AIServicesPage extends StatelessWidget {
+class AIServicesPage extends StatefulWidget {
   final VoidCallback onBack;
-  final VoidCallback onEditDreamCloud;
-  final void Function(String? serviceId) onEditCustomService;
 
   const AIServicesPage({
     super.key,
     required this.onBack,
-    required this.onEditDreamCloud,
-    required this.onEditCustomService,
   });
+
+  @override
+  State<AIServicesPage> createState() => _AIServicesPageState();
+}
+
+class _AIServicesPageState extends State<AIServicesPage> {
+  final _openaiKeyController = TextEditingController();
+  bool _isTestingOpenAI = false;
+  bool _openaiTestPassed = false;
+  String? _openaiTestError;
+  bool _obscureOpenAI = true;
+  bool _hasChanges = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadKeys();
+  }
+
+  Future<void> _loadKeys() async {
+    final aiProvider = context.read<AIServiceProvider>();
+    if (aiProvider.openaiApiKey != null) {
+      _openaiKeyController.text = aiProvider.openaiApiKey!;
+    }
+  }
+
+  @override
+  void dispose() {
+    _openaiKeyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _testOpenAIConnection() async {
+    final key = _openaiKeyController.text.trim();
+    if (key.isEmpty) {
+      setState(() {
+        _openaiTestError = 'Please enter an API key first';
+        _openaiTestPassed = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isTestingOpenAI = true;
+      _openaiTestError = null;
+      _openaiTestPassed = false;
+    });
+
+    try {
+      final testService = OpenAIService(StorageService());
+
+      // Test by making a simple API call
+      final isValid = await testService.testApiKey(key);
+
+      setState(() {
+        _isTestingOpenAI = false;
+        if (isValid) {
+          _openaiTestPassed = true;
+          _openaiTestError = null;
+        } else {
+          _openaiTestPassed = false;
+          _openaiTestError = 'Invalid API key or connection failed';
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isTestingOpenAI = false;
+        _openaiTestPassed = false;
+        _openaiTestError = 'Connection test failed: ${e.toString()}';
+      });
+    }
+  }
+
+  Future<void> _saveKeys() async {
+    final aiProvider = context.read<AIServiceProvider>();
+
+    final openaiKey = _openaiKeyController.text.trim();
+
+    bool saved = true;
+
+    if (openaiKey.isNotEmpty) {
+      saved = await aiProvider.saveOpenAIKey(openaiKey) && saved;
+    }
+
+    if (saved) {
+      setState(() {
+        _hasChanges = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('API key saved'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +120,7 @@ class AIServicesPage extends StatelessWidget {
         title: const Padding(
           padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
           child: Text(
-            'AI Account Settings',
+            'AI Service Settings',
             style: AppTextStyles.heading2,
           ),
         ),
@@ -38,241 +130,16 @@ class AIServicesPage extends StatelessWidget {
         toolbarHeight: kToolbarHeight + (AppSpacing.md * 2),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: onBack,
+          onPressed: widget.onBack,
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.md),
-            child: OutlinedButton(
-              onPressed: () async {
-                try {
-                  final uri = Uri.parse('https://dreamcloudclub.org/my-account/');
-                  await launchUrl(
-                    uri,
-                    mode: LaunchMode.externalApplication,
-                  );
-                } catch (e) {
-                  debugPrint('Error launching URL: $e');
-                  // Try alternative approach
-                  try {
-                    final uri = Uri.parse('https://dreamcloudclub.org/my-account/');
-                    await launchUrl(uri);
-                  } catch (e2) {
-                    debugPrint('Error launching URL (fallback): $e2');
-                  }
-                }
-              },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.dreamCloudBlue,
-                side: const BorderSide(
-                  color: AppColors.dreamCloudBlue,
-                  width: 1.5,
-                ),
-                backgroundColor: Colors.transparent,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.sm,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-              child: const Text(
-                'Manage Subscription',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                ),
-              ),
-            ),
-          ),
-        ],
       ),
-      body: Consumer<AIServiceProvider>(
-        builder: (context, aiProvider, _) {
-          final dreamCloud = aiProvider.dreamCloudService;
-          final customServices = aiProvider.customServices;
-
-          Color getStatusColor(AIServiceStatus status) {
-            switch (status) {
-              case AIServiceStatus.holder:
-                return Colors.amber;
-              case AIServiceStatus.active:
-                return AppColors.success;
-              case AIServiceStatus.trial:
-                return Colors.blue;
-              case AIServiceStatus.pending:
-                return Colors.orange;
-              case AIServiceStatus.expired:
-              case AIServiceStatus.inactive:
-              case AIServiceStatus.notFound:
-                return AppColors.error;
-              default:
-                return AppColors.textLight;
-            }
-          }
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Dream Cloud AI Section
-                _DreamCloudServiceCard(
-                  dreamCloud: dreamCloud,
-                  onEdit: onEditDreamCloud,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-
-                // Custom AI Accounts Section
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Custom AI Accounts',
-                      style: AppTextStyles.heading3,
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => onEditCustomService(null),
-                      icon: const Icon(Icons.add, size: 18, color: AppColors.dreamCloudBlue),
-                      label: const Text(
-                        'Add',
-                        style: TextStyle(
-                          color: AppColors.dreamCloudBlue,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.dreamCloudBlue,
-                        side: const BorderSide(
-                          color: AppColors.dreamCloudBlue,
-                          width: 1.5,
-                        ),
-                        backgroundColor: Colors.transparent,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.md,
-                          vertical: AppSpacing.sm,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-
-                if (customServices.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(AppBorderRadius.card),
-                    ),
-                    child: Center(
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.api_outlined,
-                            size: 48,
-                            color: AppColors.textLight,
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          Text(
-                            'No custom AI services',
-                            style: AppTextStyles.bodyMedium.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          Text(
-                            'Add OpenAI, Gemini, or Anthropic accounts',
-                            style: AppTextStyles.bodySmall.copyWith(
-                              color: AppColors.textLight,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  ...customServices.map((service) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: _ServiceCard(
-                      title: service.displayName,
-                      subtitle: service.type.displayName,
-                      onEdit: () => onEditCustomService(service.id),
-                    ),
-                  )),
-                const SizedBox(height: AppSpacing.lg),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _DreamCloudServiceCard extends StatelessWidget {
-  final AIService? dreamCloud;
-  final VoidCallback onEdit;
-
-  const _DreamCloudServiceCard({
-    required this.dreamCloud,
-    required this.onEdit,
-  });
-
-  Color _getStatusColor(AIServiceStatus status) {
-    switch (status) {
-      case AIServiceStatus.holder:
-        return Colors.amber;
-      case AIServiceStatus.basic:
-        return AppColors.success;
-      case AIServiceStatus.pro:
-        return Colors.blue;
-      case AIServiceStatus.active:
-        return AppColors.success;
-      case AIServiceStatus.trial:
-        return Colors.blue;
-      case AIServiceStatus.pending:
-        return Colors.orange;
-      case AIServiceStatus.expired:
-      case AIServiceStatus.inactive:
-      case AIServiceStatus.notFound:
-        return AppColors.error;
-      default:
-        return AppColors.textLight;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<AuthProvider>(
-      builder: (context, authProvider, _) {
-        final userId = authProvider.userProfile?.id;
-        final userEmail = authProvider.userProfile?.email;
-        final status = dreamCloud?.status;
-        final isUsable = status != null && status.isUsable;
-
-        return FutureBuilder<Map<String, dynamic>>(
-          future: userId != null && isUsable
-              ? UsageTrackingService.getCurrentUsage(
-                  userId,
-                  userEmail: userEmail,
-                  subscriptionStatus: status,
-                )
-              : Future.value({
-                  'tokens_used': 0,
-                  'token_limit': 0,
-                  'tokens_remaining': 0,
-                }),
-          builder: (context, snapshot) {
-            final tokensUsed = snapshot.data?['tokens_used'] as int? ?? 0;
-            final tokenLimit = snapshot.data?['token_limit'] as int? ?? 0;
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: AppSpacing.lg),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // OpenAI API Key Section
+            Container(
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -285,263 +152,199 @@ class _DreamCloudServiceCard extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Stack(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Logo
                       Container(
-                        width: 100,
-                        height: 100,
-                        padding: const EdgeInsets.all(8),
+                        width: 48,
+                        height: 48,
                         decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(AppBorderRadius.small),
-                          border: Border.all(
-                            color: AppColors.dreamCloudBlue,
-                            width: 1.5,
-                          ),
+                          color: AppColors.dreamCloudBlue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(AppBorderRadius.small),
-                          child: Image.asset(
-                            'assets/icon/logo.png',
-                            fit: BoxFit.contain,
-                          ),
+                        child: const Icon(
+                          Icons.smart_toy_outlined,
+                          color: AppColors.dreamCloudBlue,
+                          size: 28,
                         ),
                       ),
-                      const SizedBox(width: AppSpacing.lg),
-                      // Service Info
-                      Expanded(
+                      const SizedBox(width: AppSpacing.md),
+                      const Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Dream Cloud AI Account',
-                              style: AppTextStyles.heading3.copyWith(fontSize: 20),
+                              'OpenAI API Key',
+                              style: AppTextStyles.heading3,
                             ),
-                            const SizedBox(height: AppSpacing.sm),
+                            SizedBox(height: 4),
                             Text(
-                              status != null && status != AIServiceStatus.unknown
-                                  ? status.displayName
-                                  : 'Not configured',
-                              style: AppTextStyles.bodyMedium.copyWith(
-                                fontSize: 16,
-                                color: status != null && status != AIServiceStatus.unknown
-                                    ? _getStatusColor(status)
-                                    : AppColors.textLight,
+                              'Required for chat, voice, and image generation',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppColors.textSecondary,
                               ),
                             ),
-                            // Usage info (only show if subscription is usable and we have data)
-                            if (isUsable && tokenLimit > 0) ...[
-                              const SizedBox(height: AppSpacing.xs),
-                              Text(
-                                '${_formatTokens(tokensUsed)} / ${_formatTokens(tokenLimit)} tokens used',
-                                style: AppTextStyles.bodySmall.copyWith(
-                                  fontSize: 14,
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
-                      // Spacer to push button to the right
-                      const SizedBox(width: 100),
                     ],
                   ),
-                  // Edit button in top right corner
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: SizedBox(
-                      width: 90,
-                      child: OutlinedButton(
-                        onPressed: onEdit,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.dreamCloudBlue,
-                          side: const BorderSide(
-                            color: AppColors.dreamCloudBlue,
-                            width: 1.5,
-                          ),
-                          backgroundColor: Colors.transparent,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md,
-                            vertical: AppSpacing.sm,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
+                  const SizedBox(height: AppSpacing.lg),
+                  TextField(
+                    controller: _openaiKeyController,
+                    obscureText: _obscureOpenAI,
+                    onChanged: (_) => setState(() => _hasChanges = true),
+                    decoration: InputDecoration(
+                      hintText: 'sk-...',
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: AppColors.dreamCloudBlue,
+                          width: 2,
                         ),
-                        child: const Text(
-                          'Edit',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureOpenAI
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          color: AppColors.textLight,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscureOpenAI = !_obscureOpenAI),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _isTestingOpenAI ? null : _testOpenAIConnection,
+                          icon: _isTestingOpenAI
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.dreamCloudBlue,
+                                  ),
+                                )
+                              : Icon(
+                                  _openaiTestPassed
+                                      ? Icons.check_circle
+                                      : Icons.play_arrow,
+                                  color: _openaiTestPassed
+                                      ? AppColors.success
+                                      : AppColors.dreamCloudBlue,
+                                ),
+                          label: Text(
+                            _isTestingOpenAI
+                                ? 'Testing...'
+                                : _openaiTestPassed
+                                    ? 'Connection OK'
+                                    : 'Test Connection',
+                            style: TextStyle(
+                              color: _openaiTestPassed
+                                  ? AppColors.success
+                                  : AppColors.dreamCloudBlue,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.dreamCloudBlue,
+                            side: BorderSide(
+                              color: _openaiTestPassed
+                                  ? AppColors.success
+                                  : AppColors.dreamCloudBlue,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AppSpacing.md,
+                            ),
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                  if (_openaiTestError != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      _openaiTestError!,
+                      style: const TextStyle(
+                        color: AppColors.error,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+
+            // Save Button
+            AppButton(
+              label: 'Save API Key',
+              onPressed: _hasChanges ? _saveKeys : null,
+              isFullWidth: true,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+
+            // Help Text
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.dreamCloudBlue.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.dreamCloudBlue.withValues(alpha: 0.2),
+                ),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: AppColors.dreamCloudBlue,
+                        size: 20,
+                      ),
+                      SizedBox(width: AppSpacing.sm),
+                      Text(
+                        'Getting an API Key',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.dreamCloudBlue,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Sign up at platform.openai.com and create an API key in your account settings.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                      height: 1.5,
                     ),
                   ),
                 ],
               ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  String _formatTokens(int tokens) {
-    if (tokens >= 1000000) {
-      final millions = tokens / 1000000;
-      // Remove .0 for whole numbers
-      return millions % 1 == 0 
-          ? '${millions.toInt()}M'
-          : '${millions.toStringAsFixed(1)}M';
-    } else if (tokens >= 1000) {
-      final thousands = tokens / 1000;
-      // Remove .0 for whole numbers
-      return thousands % 1 == 0 
-          ? '${thousands.toInt()}K'
-          : '${thousands.toStringAsFixed(1)}K';
-    }
-    return tokens.toString();
-  }
-}
-
-class _ServiceCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final Color? subtitleColor;
-  final VoidCallback onEdit;
-  final bool isDreamCloud;
-
-  const _ServiceCard({
-    required this.title,
-    required this.subtitle,
-    this.subtitleColor,
-    required this.onEdit,
-    this.isDreamCloud = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.lg),
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppBorderRadius.card),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Logo or Icon
-              isDreamCloud
-                  ? Container(
-                      width: 100,
-                      height: 100,
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(AppBorderRadius.small),
-                        border: Border.all(
-                          color: AppColors.dreamCloudBlue,
-                          width: 1.5,
-                        ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(AppBorderRadius.small),
-                        child: Image.asset(
-                          'assets/icon/logo.png',
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-                    )
-                  : Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: AppColors.dreamCloudBlue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(AppBorderRadius.small),
-                      ),
-                      child: const Icon(
-                        Icons.cloud_outlined,
-                        color: AppColors.dreamCloudBlue,
-                      ),
-                    ),
-              const SizedBox(width: AppSpacing.lg),
-              // Service Info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: AppTextStyles.heading3.copyWith(
-                        fontSize: isDreamCloud ? 20 : 22,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      subtitle,
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        fontSize: 16,
-                        color: subtitleColor ?? AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Spacer to push button to the right
-              const SizedBox(width: 100),
-            ],
-          ),
-          // Edit button in top right corner
-          Positioned(
-            top: 0,
-            right: 0,
-            child: SizedBox(
-              width: 90,
-              child: OutlinedButton(
-                onPressed: onEdit,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.dreamCloudBlue,
-                  side: const BorderSide(
-                    color: AppColors.dreamCloudBlue,
-                    width: 1.5,
-                  ),
-                  backgroundColor: Colors.transparent,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.md,
-                    vertical: AppSpacing.sm,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                ),
-                child: const Text(
-                  'Edit',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                  ),
-                ),
-              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

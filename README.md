@@ -22,7 +22,7 @@ flutter run -d R95YA01NVDK
 ### Samsung Galaxy A9+
 flutter clean
 flutter pub get
-flutter run -d R95YA021V0E
+flutter run -d R95Y908GYYD
 ## Overview
 
 Millie Mini is a voice-controlled AI assistant with an animated face interface. The application follows a strict turn-based conversation model where the user speaks, Millie listens, processes, and responds - with no interruptions or streaming.

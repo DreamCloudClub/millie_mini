@@ -92,6 +92,7 @@ class Agent {
   final String voice;
   final String personalityId;
   final String introMessage;
+  final String voiceMode; // 'turn_taking' or 'realtime'
   final bool isActive;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -107,6 +108,7 @@ class Agent {
     required this.voice,
     required this.personalityId,
     this.introMessage = 'Hello {username}, it\'s me Millie your personal AI Agent. How can I help you?',
+    this.voiceMode = 'turn_taking',
     required this.isActive,
     required this.createdAt,
     required this.updatedAt,
@@ -131,6 +133,7 @@ class Agent {
     String? voice,
     String? personalityId,
     String? introMessage,
+    String? voiceMode,
     bool? isActive,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -146,6 +149,7 @@ class Agent {
       voice: voice ?? this.voice,
       personalityId: personalityId ?? this.personalityId,
       introMessage: introMessage ?? this.introMessage,
+      voiceMode: voiceMode ?? this.voiceMode,
       isActive: isActive ?? this.isActive,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -164,6 +168,7 @@ class Agent {
       'voice': voice,
       'personalityId': personalityId,
       'introMessage': introMessage,
+      'voiceMode': voiceMode,
       'isActive': isActive,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -182,6 +187,7 @@ class Agent {
       voice: json['voice'] as String,
       personalityId: json['personalityId'] as String,
       introMessage: json['introMessage'] as String? ?? 'Hello {username}, it\'s me Millie your personal AI Agent. How can I help you?',
+      voiceMode: json['voiceMode'] as String? ?? 'turn_taking',
       isActive: json['isActive'] as bool,
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
@@ -195,7 +201,7 @@ class Agent {
       name: 'Millie',
       faceColor: FaceColor.white,
       eyeShape: EyeShape.roundedSquares,
-      aiServiceId: 'dream_cloud_default',
+      aiServiceId: 'openai_default',
       voice: 'Alloy',
       personalityId: 'default_home',
       isActive: true,
