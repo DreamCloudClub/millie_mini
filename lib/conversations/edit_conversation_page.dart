@@ -575,6 +575,8 @@ class _StepCard extends StatelessWidget {
         return AppColors.primaryOrange;
       case SlotType.address:
         return Colors.teal;
+      case SlotType.phone:
+        return Colors.indigo;
       case SlotType.freeform:
         return Colors.purple;
     }
@@ -592,6 +594,8 @@ class _StepCard extends StatelessWidget {
         return 'date/time';
       case SlotType.address:
         return 'address';
+      case SlotType.phone:
+        return 'phone';
       case SlotType.freeform:
         return 'freeform';
     }
@@ -794,6 +798,8 @@ class _StepEditorDialogState extends State<_StepEditorDialog> {
         return 'Date/Time (AI extracts & verifies)';
       case SlotType.address:
         return 'Address (AI extracts & verifies)';
+      case SlotType.phone:
+        return 'Phone number (shown as (555) 123-4567)';
       case SlotType.freeform:
         return 'Freeform (may need follow-up)';
     }
@@ -871,6 +877,7 @@ class _StepEditorDialogState extends State<_StepEditorDialog> {
                         break;
                       case SlotType.datetime:
                       case SlotType.address:
+                      case SlotType.phone:
                         _confirmationType = ConfirmationType.explicit;
                         break;
                       case SlotType.simple:

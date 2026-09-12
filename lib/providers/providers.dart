@@ -8,3 +8,4 @@ export 'custom_face_provider.dart';
 export 'openclaw_provider.dart';
 export 'conversation_template_provider.dart';
 export 'conversation_report_provider.dart';
+export 'inventory_provider.dart';

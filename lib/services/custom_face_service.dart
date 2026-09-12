@@ -133,6 +133,7 @@ class CustomFaceService {
 
   /// Delete a custom face
   static Future<bool> deleteFace(String id) async {
+    if (CustomFace.builtInById(id) != null) return false;
     try {
       final faces = await loadAll();
       final faceIndex = faces.indexWhere((f) => f.id == id);
@@ -160,6 +161,8 @@ class CustomFaceService {
 
   /// Get a face by ID
   static Future<CustomFace?> getById(String id) async {
+    final builtIn = CustomFace.builtInById(id);
+    if (builtIn != null) return builtIn;
     final faces = await loadAll();
     try {
       return faces.firstWhere((f) => f.id == id);
@@ -170,6 +173,9 @@ class CustomFaceService {
 
   /// Get the local file path for a custom face
   static Future<String?> getLocalPath(String id) async {
+    // Built-ins are bundled assets, not files on disk
+    final builtIn = CustomFace.builtInById(id);
+    if (builtIn != null) return builtIn.localPath;
     final face = await getById(id);
     if (face != null && await File(face.localPath).exists()) {
       return face.localPath;

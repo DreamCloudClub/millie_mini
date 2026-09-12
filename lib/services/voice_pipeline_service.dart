@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../utils/text_helpers.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -1828,6 +1829,7 @@ class VoicePipelineService {
 - Continue the conversation naturally and wait for the user's next question or statement.
 - Stay in character and maintain the conversation flow.
 - Do not make up information you don't know - say "I don't know" if unsure.
+- Your replies are spoken aloud and shown as plain text. Never use markdown: no asterisks, bold, headings, or bullet symbols. Write measurements in words ("two and a half inch", not "2-1/2 in."). This applies to your replies only - note content can still be formatted.
 
 NOTES CAPABILITY:
 You can create, read, update, and manage notes for the user. Use notes to:
@@ -2154,6 +2156,8 @@ Format note content nicely with line breaks, bullet points, and clear sections.
         return IntentCategory.games;
       case 'navigation':
         return IntentCategory.navigation;
+      case 'inventory':
+        return IntentCategory.inventory;
       default:
         debugPrint('Unknown capability requested: $capability');
         return null;
@@ -2161,13 +2165,8 @@ Format note content nicely with line breaks, bullet points, and clear sections.
   }
 
   Future<String?> _textToSpeech(String text, String voice) async {
-    // Sanitize text for better TTS pronunciation
-    String sanitizedText = text
-        .replaceAll('°F', ' degrees')
-        .replaceAll('°C', ' degrees')
-        .replaceAll('°', ' degrees')
-        .replaceAll('℉', ' degrees')
-        .replaceAll('℃', ' degrees');
+    // Sanitize text for better TTS pronunciation (markdown, degrees, sizes)
+    final sanitizedText = toSpeakableText(text);
 
     debugPrint('TTS processing: $sanitizedText with voice: $voice');
 
@@ -2239,7 +2238,9 @@ Format note content nicely with line breaks, bullet points, and clear sections.
 
   /// Generate TTS audio for multiple text chunks in parallel
   Future<List<String>> _generateTTSChunks(String text, String voice) async {
-    final chunks = _splitIntoChunks(text);
+    // Clean before splitting: chunks break on periods, and abbreviations like
+    // "in." would otherwise cut a product name across two audio clips.
+    final chunks = _splitIntoChunks(toSpeakableText(text));
     
     if (chunks.isEmpty) {
       debugPrint('No chunks to generate TTS for');

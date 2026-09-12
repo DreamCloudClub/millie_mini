@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -31,6 +32,11 @@ class _ConversationPageState extends State<ConversationPage> {
   int _currentPage = 1; // Start on Face page (center)
   bool _isStartingSession = false;
 
+  /// How long the face can sit paused before the session resets to Ready.
+  static const Duration _pauseTimeout = Duration(seconds: 30);
+  Timer? _pauseTimeoutTimer;
+  VoiceProvider? _voiceProvider;
+
   // Keys to access page states for external control
   final GlobalKey<ChatPageState> _chatPageKey = GlobalKey<ChatPageState>();
   final GlobalKey<NotesPageState> _notesPageKey = GlobalKey<NotesPageState>();
@@ -60,7 +66,40 @@ class _ConversationPageState extends State<ConversationPage> {
     // Set up AI navigation callback
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupAINavigation();
+      _voiceProvider = context.read<VoiceProvider>()
+        ..addListener(_syncPauseTimeout);
       _startSession();
+    });
+  }
+
+  /// Starts the pause timeout while the face is paused, cancels it otherwise.
+  ///
+  /// Only on the face page: swiping to Chat pauses the session for text input,
+  /// and Notes/Schedule can be paused while reading - resetting there would
+  /// throw away the conversation the user is still working in.
+  void _syncPauseTimeout() {
+    final shouldTime = _voiceProvider?.state == VoiceState.paused &&
+        _currentPage == facePageIndex;
+
+    if (!shouldTime) {
+      _pauseTimeoutTimer?.cancel();
+      _pauseTimeoutTimer = null;
+      return;
+    }
+
+    // Already counting down - repeated notifications while paused must not
+    // push the deadline back.
+    if (_pauseTimeoutTimer != null) return;
+
+    _pauseTimeoutTimer = Timer(_pauseTimeout, () {
+      _pauseTimeoutTimer = null;
+      if (!mounted) return;
+      if (_voiceProvider?.state != VoiceState.paused ||
+          _currentPage != facePageIndex) {
+        return;
+      }
+      debugPrint('Paused for ${_pauseTimeout.inSeconds}s - resetting to Ready');
+      _handleRefreshFromChat();
     });
   }
 
@@ -172,6 +211,8 @@ class _ConversationPageState extends State<ConversationPage> {
 
   @override
   void dispose() {
+    _pauseTimeoutTimer?.cancel();
+    _voiceProvider?.removeListener(_syncPauseTimeout);
     _pageController.dispose();
 
     // Notify scheduler that we're leaving
@@ -337,6 +378,7 @@ class _ConversationPageState extends State<ConversationPage> {
           setState(() {
             _currentPage = index;
           });
+          _syncPauseTimeout();
 
           // Update status bar visibility based on page
           _updateStatusBar(index);

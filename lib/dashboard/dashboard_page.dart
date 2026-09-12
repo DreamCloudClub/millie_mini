@@ -15,6 +15,7 @@ class DashboardPage extends StatelessWidget {
   final VoidCallback onEditBrain;
   final VoidCallback onEditDeviceSettings;
   final VoidCallback onEditConversations;
+  final VoidCallback onEditInventory;
   final VoidCallback onViewReports;
 
   const DashboardPage({
@@ -27,6 +28,7 @@ class DashboardPage extends StatelessWidget {
     required this.onEditBrain,
     required this.onEditDeviceSettings,
     required this.onEditConversations,
+    required this.onEditInventory,
     required this.onViewReports,
   });
 
@@ -165,15 +167,19 @@ class DashboardPage extends StatelessWidget {
               _ReportsCard(onView: onViewReports),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 5: AI Service
+              // Card 5: Inventory
+              _InventoryCard(onEdit: onEditInventory),
+              const SizedBox(height: AppSpacing.md),
+
+              // Card 6: AI Service
               _AIServiceCard(onEdit: onEditAIService),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 6: Open Claw
+              // Card 7: Open Claw
               _BrainCard(onEdit: onEditBrain),
               const SizedBox(height: AppSpacing.md),
 
-              // Card 7: Device Settings
+              // Card 8: Device Settings
               _DeviceSettingsCard(onEdit: onEditDeviceSettings),
               const SizedBox(height: AppSpacing.lg),
             ],
@@ -700,6 +706,55 @@ class _ReportsCard extends StatelessWidget {
                   color: AppColors.textPrimary,
                 ),
               ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _InventoryCard extends StatelessWidget {
+  final VoidCallback onEdit;
+
+  const _InventoryCard({required this.onEdit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<InventoryProvider>(
+      builder: (context, provider, _) {
+        final count = provider.items.length;
+        final needsAttention = provider.lowStockCount + provider.outOfStockCount;
+
+        return AppCard(
+          title: 'Inventory',
+          onEdit: onEdit,
+          child: Row(
+            children: [
+              Icon(
+                Icons.inventory_2_outlined,
+                color: AppColors.dreamCloudBlue,
+                size: 20,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  count == 0
+                      ? 'No products loaded'
+                      : '$count product${count == 1 ? '' : 's'} with store locations',
+                  style: AppTextStyles.bodyMedium.copyWith(
+                    fontSize: 16,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              if (needsAttention > 0)
+                Text(
+                  '$needsAttention low or out of stock',
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.primaryOrange,
+                  ),
+                ),
             ],
           ),
         );

@@ -32,40 +32,38 @@ class FacePageContent extends StatefulWidget {
 }
 
 class _FacePageContentState extends State<FacePageContent> {
-  bool _showControlBar = true; // Start with bars visible
-  DateTime? _lastTapTime;
-  int _tapCount = 0;
+  bool _showControlBar = false; // Bars appear on long press
+  bool _isStartingConversation = false;
 
+  /// One tap starts the conversation when idle and pauses it when active.
   Future<void> _handleTap() async {
-    final now = DateTime.now();
     final voiceProvider = context.read<VoiceProvider>();
 
-    // Check for double tap (within 300ms)
-    if (_lastTapTime != null &&
-        now.difference(_lastTapTime!).inMilliseconds < 300) {
-      _tapCount++;
-      if (_tapCount >= 2) {
-        _tapCount = 0;
-        _lastTapTime = null;
-
-        // If in sleep or paused state, wake up/resume
-        if (voiceProvider.state == VoiceState.sleep ||
-            voiceProvider.state == VoiceState.paused) {
-          debugPrint(
-              'Double tap detected in ${voiceProvider.state} - waking up/resuming');
-          await voiceProvider.resume();
-          return;
-        }
-
-        // Otherwise, toggle pause/play
-        await voiceProvider.togglePause();
-        return;
-      }
-    } else {
-      _tapCount = 1;
+    if (voiceProvider.state == VoiceState.sleep ||
+        voiceProvider.state == VoiceState.paused) {
+      await _startConversation();
+      return;
     }
 
-    _lastTapTime = now;
+    // Taps landing while the intro is still starting would otherwise pause
+    // the conversation the first tap just kicked off.
+    if (_isStartingConversation) return;
+
+    await voiceProvider.pause();
+  }
+
+  /// Wake from sleep or resume from pause.
+  ///
+  /// Waking plays the intro before the voice state changes, so without the
+  /// guard repeated taps during the intro would start it again.
+  Future<void> _startConversation() async {
+    if (_isStartingConversation) return;
+    _isStartingConversation = true;
+    try {
+      await context.read<VoiceProvider>().resume();
+    } finally {
+      _isStartingConversation = false;
+    }
   }
 
   void _handleLongPress() {
@@ -132,7 +130,13 @@ class _FacePageContentState extends State<FacePageContent> {
   ) {
     // Use synchronous lookup from cached provider (no FutureBuilder needed)
     final customFaceProvider = context.read<CustomFaceProvider>();
-    final localPath = customFaceProvider.getLocalPath(agent.customFaceId);
+
+    final face = customFaceProvider.getById(agent.customFaceId);
+    if (face != null && face.isBuiltIn) {
+      return _buildLogoFace(face.localPath, voiceProvider);
+    }
+
+    final localPath = face?.localPath;
 
     if (localPath == null) {
       // Fallback to robot face if custom face not found
@@ -168,6 +172,46 @@ class _FacePageContentState extends State<FacePageContent> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Brand logo centered on black, with a prompt underneath.
+  ///
+  /// Shows "Tap to Start" while idle; once the conversation is running the
+  /// prompt becomes the live status so the customer can see Millie is listening.
+  Widget _buildLogoFace(String assetPath, VoiceProvider voiceProvider) {
+    final screen = MediaQuery.of(context).size;
+    // As large as fits: most of the width, but on a landscape tablet the
+    // height is the limit, so leave room for the gap and the prompt text.
+    const promptSpace = 160.0;
+    final logoSize = (screen.width * 0.8)
+        .clamp(0.0, (screen.height - promptSpace).clamp(0.0, double.infinity))
+        .toDouble();
+    final isIdle = voiceProvider.state == VoiceState.sleep ||
+        voiceProvider.state == VoiceState.paused;
+
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset(
+            assetPath,
+            width: logoSize,
+            height: logoSize,
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          Text(
+            isIdle ? 'Tap to Start' : voiceProvider.state.statusText,
+            style: const TextStyle(
+              fontFamily: AppTextStyles.fontFamily,
+              fontSize: 32,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

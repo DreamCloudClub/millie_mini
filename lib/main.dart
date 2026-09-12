@@ -22,6 +22,7 @@ import 'conversations/edit_conversation_page.dart';
 import 'conversations/conversation_kiosk_page.dart';
 import 'conversations/reports_page.dart';
 import 'conversations/view_report_page.dart';
+import 'inventory/inventory_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -93,6 +94,9 @@ class MillieMiniApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => ConversationReportProvider(storageService),
         ),
+        ChangeNotifierProvider(
+          create: (_) => InventoryProvider(storageService),
+        ),
       ],
       child: MaterialApp(
         title: 'Millie Mini',
@@ -149,12 +153,16 @@ class _AppNavigatorState extends State<AppNavigator> {
       context.read<OpenClawProvider>().init(),
       context.read<ConversationTemplateProvider>().init(),
       context.read<ConversationReportProvider>().init(),
+      context.read<InventoryProvider>().init(),
     ]);
 
     // Wire up ReminderIntentHandler in VoiceProvider
     final voiceProvider = context.read<VoiceProvider>();
     final reminderProvider = context.read<ReminderProvider>();
     voiceProvider.setReminderProvider(reminderProvider);
+
+    // Let the AI answer "where is X" from store inventory
+    voiceProvider.setInventoryProvider(context.read<InventoryProvider>());
 
     // Wire up OpenClawProvider for alternative LLM routing
     final openClawProvider = context.read<OpenClawProvider>();
@@ -231,6 +239,7 @@ enum MainRoute {
   conversationKiosk,
   reports,
   viewReport,
+  inventory,
 }
 
 class _MainNavigatorState extends State<MainNavigator> {
@@ -275,6 +284,16 @@ class _MainNavigatorState extends State<MainNavigator> {
           onEditDeviceSettings: () => _push(MainRoute.deviceSettings),
           onEditConversations: () => _push(MainRoute.conversations),
           onViewReports: () => _push(MainRoute.reports),
+          onEditInventory: () => _push(MainRoute.inventory),
+        );
+
+      case MainRoute.inventory:
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _pop();
+          },
+          child: InventoryPage(onBack: _pop),
         );
 
       case MainRoute.face:

@@ -256,11 +256,11 @@ class ConversationTemplateProvider extends ChangeNotifier {
           slotType: SlotType.name,
           confirmationType: ConfirmationType.explicitSpelling,
         ),
-        // Phone - explicit confirmation
+        // Phone - AI extracts digits, shown as a formatted number
         StarterStep(
           prompt: "What is a good phone number to reach you?",
           slotName: 'phone_number',
-          slotType: SlotType.simple,
+          slotType: SlotType.phone,
           confirmationType: ConfirmationType.explicit,
         ),
         // Reason - freeform with auto follow-up

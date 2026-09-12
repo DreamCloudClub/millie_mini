@@ -9,6 +9,7 @@ enum IntentCategory {
   navigation, // App navigation (go back, show chat, etc.)
   games,      // Games and lessons
   reports,    // AI reports and news
+  inventory,  // Store products: locations, prices, stock
   none,       // No tools needed - just conversation
 }
 
@@ -111,6 +112,12 @@ class IntentRouter {
     if (_isReportsIntent(lower)) {
       categories.add(IntentCategory.reports);
       debugPrint('IntentRouter: Detected reports intent');
+    }
+
+    // Check for store inventory intent
+    if (_isInventoryIntent(lower)) {
+      categories.add(IntentCategory.inventory);
+      debugPrint('IntentRouter: Detected inventory intent');
     }
 
     // If no specific intent detected, it's just conversation
@@ -306,6 +313,32 @@ class IntentRouter {
            lower.contains('politics');
   }
 
+  /// Check if message is a shopper asking about products in the store.
+  ///
+  /// Casts a wide net on purpose: a missed detection means Millie can't answer
+  /// "where are the deck screws", while a false one only costs a couple of
+  /// tool definitions in the request.
+  static bool _isInventoryIntent(String lower) {
+    return lower.contains('where') ||
+           lower.contains('aisle') ||
+           lower.contains('shelf') ||
+           lower.contains('in stock') ||
+           lower.contains('stock') ||
+           lower.contains('inventory') ||
+           lower.contains('do you have') ||
+           lower.contains('do you carry') ||
+           lower.contains('do you sell') ||
+           lower.contains('looking for') ||
+           lower.contains('i need') ||
+           lower.contains('find') ||
+           lower.contains('how much') ||
+           lower.contains('price') ||
+           lower.contains('cost') ||
+           lower.contains('sku') ||
+           lower.contains('product') ||
+           lower.contains('buy');
+  }
+
   /// Get tool names for given categories
   static List<String> getToolNamesForCategories(Set<IntentCategory> categories) {
     final tools = <String>{};
@@ -368,6 +401,12 @@ class IntentRouter {
             'save_report',
             'set_report_filter',
             'set_report_category',
+          ]);
+          break;
+        case IntentCategory.inventory:
+          tools.addAll([
+            'search_inventory',
+            'get_product_details',
           ]);
           break;
         case IntentCategory.none:

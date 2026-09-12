@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../models/custom_face.dart';
 import '../services/custom_face_service.dart';
 import '../utils/constants.dart';
 
@@ -24,6 +25,12 @@ class FacePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Built-in brand faces are bundled assets shown as a centered logo
+    final builtIn = CustomFace.builtInById(customFaceId);
+    if (builtIn != null) {
+      return _buildBuiltInPreview(builtIn);
+    }
+
     // If customFaceId is set, display the custom face image from local storage
     if (customFaceId != null) {
       return _buildCustomFacePreview();
@@ -31,6 +38,19 @@ class FacePreview extends StatelessWidget {
 
     // Default robot face
     return _buildRobotFace();
+  }
+
+  Widget _buildBuiltInPreview(CustomFace face) {
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(size * 0.06),
+      decoration: BoxDecoration(
+        color: showBackground ? AppColors.faceBackground : Colors.transparent,
+        borderRadius: BorderRadius.circular(size * 0.08),
+      ),
+      child: Image.asset(face.localPath, fit: BoxFit.contain),
+    );
   }
 
   Widget _buildCustomFacePreview() {

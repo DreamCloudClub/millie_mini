@@ -57,6 +57,7 @@ flutter:
   assets:
     - assets/icon/icon.png
     - assets/icon/logo.png
+    - assets/icon/home_depot.png
     - assets/shapes/
 
 # App Icon Configuration

@@ -10,6 +10,7 @@ import '../providers/providers.dart';
 import '../services/openai_service.dart';
 import '../services/storage_service.dart';
 import '../utils/constants.dart';
+import '../utils/text_helpers.dart';
 import '../widgets/widgets.dart';
 
 /// Dedicated kiosk page for running scripted conversations
@@ -364,6 +365,7 @@ class _ConversationKioskPageState extends State<ConversationKioskPage> {
     final needsAIHandling = step.slotType == SlotType.name ||
         step.slotType == SlotType.datetime ||
         step.slotType == SlotType.address ||
+        step.collectsPhoneNumber ||
         step.confirmationType == ConfirmationType.explicitSpelling;
 
     if (needsAIHandling) {
@@ -446,10 +448,13 @@ Just respond with the single word.''';
       case SlotType.address:
         dataTypeLabel = 'address';
         break;
+      case SlotType.phone:
+        dataTypeLabel = 'phone number';
+        break;
       case SlotType.simple:
       case SlotType.freeform:
       case SlotType.none:
-        dataTypeLabel = 'information';
+        dataTypeLabel = step.collectsPhoneNumber ? 'phone number' : 'information';
         break;
     }
 
@@ -492,7 +497,7 @@ Respond with ONLY the format above, nothing else.''',
         final newValue = parts.length > 1 ? parts[1].trim() : _currentResponse;
 
         // Clean the new value with AI to ensure proper formatting
-        final cleanedValue = await _extractDataWithAI(newValue, step.slotType);
+        final cleanedValue = await _extractDataWithAI(newValue, step);
 
         setState(() {
           _currentResponse = cleanedValue;
@@ -521,6 +526,7 @@ Respond with ONLY the format above, nothing else.''',
     final needsAIExtraction = step.slotType == SlotType.name ||
         step.slotType == SlotType.datetime ||
         step.slotType == SlotType.address ||
+        step.collectsPhoneNumber ||
         step.confirmationType == ConfirmationType.explicitSpelling;
 
     if (needsAIExtraction) {
@@ -528,7 +534,7 @@ Respond with ONLY the format above, nothing else.''',
         _state = KioskState.processing;
       });
 
-      final cleanedValue = await _extractDataWithAI(response, step.slotType);
+      final cleanedValue = await _extractDataWithAI(response, step);
 
       setState(() {
         _currentResponse = cleanedValue;
@@ -561,11 +567,17 @@ Respond with ONLY the format above, nothing else.''',
   }
 
   /// Use AI to extract clean structured data from transcription
-  Future<String> _extractDataWithAI(String transcription, SlotType slotType) async {
+  Future<String> _extractDataWithAI(String transcription, ConversationStep step) async {
     String prompt;
     String systemPrompt;
 
-    switch (slotType) {
+    // Phone numbers can arrive on a step whose slot type was never set to
+    // phone, so the wording check decides before the slot type switch.
+    if (step.collectsPhoneNumber) {
+      return _extractPhoneNumberWithAI(transcription);
+    }
+
+    switch (step.slotType) {
       case SlotType.name:
         systemPrompt = 'You extract names from speech transcriptions. Return only the name, nothing else.';
         prompt = '''The user was asked for their name. The transcription is: "$transcription"
@@ -617,6 +629,42 @@ Return ONLY the cleaned value, nothing else.''';
     }
   }
 
+  /// Pull a phone number out of a transcription and format it for the screen.
+  ///
+  /// Speech-to-text renders spoken digits inconsistently ("five five five",
+  /// "555 123 4567", "area code 555..."), so the model reduces it to digits and
+  /// [formatPhoneNumberForDisplay] does the presentation.
+  Future<String> _extractPhoneNumberWithAI(String transcription) async {
+    try {
+      final result = await _openAIService.callChatCompletions(
+        systemPrompt:
+            'You extract phone numbers from speech transcriptions. Return only digits, nothing else.',
+        conversationHistory: [],
+        userMessage: '''The user was asked for a phone number. The transcription is: "$transcription"
+
+Extract the phone number and return ONLY its digits, with no spaces, dashes, parentheses, or words.
+Convert spelled-out numbers to digits ("five five five" becomes "555", "triple eight" becomes "888").
+Drop filler words like "my number is", "area code", or "extension".
+Keep a leading country code only if the user actually said one.
+
+Examples:
+- "my number is five five five, one two three, four five six seven" -> 5551234567
+- "area code 555 then 123-4567" -> 5551234567
+- "it's 1 800 555 0199" -> 18005550199
+
+Return ONLY the digits, nothing else.''',
+        model: 'gpt-4o-mini',
+      );
+
+      final extracted = result?.content?.trim() ?? transcription;
+      return formatPhoneNumberForDisplay(extracted);
+    } catch (e) {
+      debugPrint('Error extracting phone number: $e');
+      // Fall back to formatting whatever digits the transcription already has.
+      return formatPhoneNumberForDisplay(transcription);
+    }
+  }
+
   /// Use AI to generate a natural confirmation for structured data
   Future<void> _generateAIConfirmation(ConversationStep step, String value) async {
     setState(() {
@@ -634,10 +682,13 @@ Return ONLY the cleaned value, nothing else.''';
       case SlotType.address:
         promptContext = 'address';
         break;
+      case SlotType.phone:
+        promptContext = 'phone number';
+        break;
       case SlotType.simple:
       case SlotType.freeform:
       case SlotType.none:
-        promptContext = 'information';
+        promptContext = step.collectsPhoneNumber ? 'phone number' : 'information';
         break;
     }
 
@@ -794,12 +845,12 @@ Respond with ONLY one of these formats.''',
 
           if (matchedKey != null) {
             setState(() {
-              _responses[matchedKey!] = newValue;
+              _responses[matchedKey!] = _formatValueForSlot(matchedKey, newValue);
             });
           } else if (resultText.startsWith('ADD|')) {
             // Add new field
             setState(() {
-              _responses[fieldName] = newValue;
+              _responses[fieldName] = _formatValueForSlot(fieldName, newValue);
             });
           }
 
@@ -826,6 +877,24 @@ Respond with ONLY one of these formats.''',
       debugPrint('Error processing review response: $e');
       _finalizeAndComplete();
     }
+  }
+
+  /// Re-applies display formatting when a review edit writes to a slot.
+  ///
+  /// The review flow updates [_responses] by slot name rather than by step, so
+  /// look the step back up to keep a corrected phone number formatted.
+  String _formatValueForSlot(String slotName, String value) {
+    for (final step in _template?.steps ?? const <ConversationStep>[]) {
+      if (step.slotName == slotName) {
+        return step.collectsPhoneNumber
+            ? formatPhoneNumberForDisplay(value)
+            : value;
+      }
+    }
+    // Fields added during review have no step to consult.
+    return slotName.toLowerCase().contains('phone')
+        ? formatPhoneNumberForDisplay(value)
+        : value;
   }
 
   void _finalizeAndComplete() {
@@ -1472,6 +1541,29 @@ Respond with ONLY one of these formats.''',
               fontSize: 18,
             ),
             textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+
+          // Completion check
+          Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.dreamCloudBlue,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.dreamCloudBlue.withValues(alpha: 0.4),
+                  blurRadius: 24,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.check_rounded,
+              color: Colors.white,
+              size: 56,
+            ),
           ),
         ],
       ),

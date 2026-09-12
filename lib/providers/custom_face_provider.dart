@@ -30,6 +30,8 @@ class CustomFaceProvider extends ChangeNotifier {
   /// Get a custom face by ID (synchronous lookup from cache)
   CustomFace? getById(String? id) {
     if (id == null) return null;
+    final builtIn = CustomFace.builtInById(id);
+    if (builtIn != null) return builtIn;
     try {
       return _customFaces.firstWhere((face) => face.id == id);
     } catch (_) {

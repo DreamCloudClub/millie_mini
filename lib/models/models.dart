@@ -8,3 +8,4 @@ export 'conversation_template.dart';
 export 'conversation_report.dart';
 export 'reminder.dart';
 export 'note.dart';
+export 'inventory_item.dart';

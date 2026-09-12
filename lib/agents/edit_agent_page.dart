@@ -67,7 +67,7 @@ class _EditAgentPageState extends State<EditAgentPage> {
     final faces = await CustomFaceService.loadAll();
     if (mounted) {
       setState(() {
-        _customFaces = faces;
+        _customFaces = [...CustomFace.builtInFaces, ...faces];
       });
     }
   }
@@ -813,22 +813,27 @@ class _CustomFaceGrid extends StatelessWidget {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(AppBorderRadius.small - 2),
-                  child: Image.file(
-                    File(face.localPath),
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: Colors.grey.shade300,
-                      child: const Center(
-                        child: Icon(Icons.face, color: Colors.white, size: 32),
-                      ),
-                    ),
-                  ),
+                  child: face.isBuiltIn
+                      ? Padding(
+                          padding: const EdgeInsets.all(AppSpacing.xs),
+                          child: Image.asset(face.localPath, fit: BoxFit.contain),
+                        )
+                      : Image.file(
+                          File(face.localPath),
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: Colors.grey.shade300,
+                            child: const Center(
+                              child: Icon(Icons.face, color: Colors.white, size: 32),
+                            ),
+                          ),
+                        ),
                 ),
               ),
-              // Delete button (only in edit mode)
-              if (isEditing)
+              // Delete button (only in edit mode; built-ins can't be deleted)
+              if (isEditing && !face.isBuiltIn)
                 Positioned.fill(
                   child: GestureDetector(
                     onTap: () => onDelete(face.id),

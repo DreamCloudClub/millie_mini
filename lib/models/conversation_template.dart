@@ -25,6 +25,8 @@ enum SlotType {
   datetime,
   /// Address - AI extracts and verifies
   address,
+  /// Phone number - AI extracts digits, displayed as a formatted number
+  phone,
   /// Open-ended response that may need follow-up
   freeform,
   /// No response expected (statement only)
@@ -54,6 +56,21 @@ class ConversationStep {
 
   /// Whether AI should potentially ask follow-up based on slot type
   bool get mayNeedFollowUp => slotType == SlotType.freeform;
+
+  /// Whether this step is collecting a phone number.
+  ///
+  /// Covers the explicit [SlotType.phone] as well as steps that merely ask for
+  /// a phone number in their wording - AI-generated and hand-written steps
+  /// often leave the slot type as simple, and those should still be read back
+  /// as a formatted phone number rather than a run of digits.
+  bool get collectsPhoneNumber {
+    if (slotType == SlotType.phone) return true;
+    if (!capturesResponse) return false;
+    final text = '${slotName ?? ''} $prompt'.toLowerCase();
+    return text.contains('phone') ||
+        text.contains('cell number') ||
+        text.contains('mobile number');
+  }
 
   ConversationStep copyWith({
     String? id,

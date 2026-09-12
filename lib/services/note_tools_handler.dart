@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/models.dart';
+import '../providers/inventory_provider.dart';
 import '../providers/reminder_provider.dart';
 import 'app_launcher_service.dart';
 import 'intent_router.dart';
@@ -15,6 +16,7 @@ class AIToolResult {
   final List<Note>? notes;
   final Reminder? alert;
   final List<Reminder>? alerts;
+  final List<InventoryItem>? products;
   /// If set, indicates the LLM needs this capability and we should retry with it
   final String? requestedCapability;
 
@@ -25,6 +27,7 @@ class AIToolResult {
     this.notes,
     this.alert,
     this.alerts,
+    this.products,
     this.requestedCapability,
   });
   
@@ -47,6 +50,18 @@ class AIToolResult {
       'title': a.title,
       'scheduled_at': a.scheduledAt.toIso8601String(),
       'recurrence': a.recurrence.displayName,
+    }).toList(),
+    if (products != null) 'products': products!.map((p) => {
+      'sku': p.sku,
+      'spoken_name': p.spokenName,
+      'name': p.name,
+      'brand': p.brand,
+      'department': p.department,
+      'price': p.price,
+      'quantity_in_stock': p.quantity,
+      'in_stock': !p.isOutOfStock,
+      'location': p.locationLabel,
+      'description': p.description,
     }).toList(),
   };
 }
@@ -72,6 +87,9 @@ class NoteToolsHandler {
   // Weather service for weather queries
   WeatherService? _weatherService;
 
+  // Store inventory for product location lookups
+  InventoryProvider? _inventoryProvider;
+
 
   // Track the currently active/open note
   Note? _activeNote;
@@ -90,6 +108,11 @@ class NoteToolsHandler {
   /// Set the weather service (injected with API key)
   void setWeatherService(WeatherService service) {
     _weatherService = service;
+  }
+
+  /// Set the inventory provider (injected from VoiceProvider)
+  void setInventoryProvider(InventoryProvider provider) {
+    _inventoryProvider = provider;
   }
 
   
@@ -668,6 +691,49 @@ class NoteToolsHandler {
         },
       },
     },
+    // ===== STORE INVENTORY TOOLS =====
+    {
+      'type': 'function',
+      'function': {
+        'name': 'search_inventory',
+        'description': 'Search the store inventory for products. Returns matching products with their in-store location (aisle, shelf, bin), price, and stock. Use whenever a customer asks where something is, whether it is in stock, or what it costs.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'query': {
+              'type': 'string',
+              'description': 'What the customer is looking for, in plain words (e.g., "deck screws", "cordless drill", "white interior paint"). A SKU also works.',
+            },
+            'department': {
+              'type': 'string',
+              'description': 'Optional department to narrow results (e.g., "Plumbing", "Paint", "Power Tools")',
+            },
+            'aisle': {
+              'type': 'integer',
+              'description': 'Optional aisle number, to list everything stocked in that aisle instead of searching',
+            },
+          },
+          'required': [],
+        },
+      },
+    },
+    {
+      'type': 'function',
+      'function': {
+        'name': 'get_product_details',
+        'description': 'Get full details for one product by SKU, including location, price, stock, and description. Use after search_inventory when the customer asks a follow-up about a specific product.',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'sku': {
+              'type': 'string',
+              'description': 'The product SKU from a previous search result',
+            },
+          },
+          'required': ['sku'],
+        },
+      },
+    },
     // ===== CAPABILITY REQUEST TOOL (always available) =====
     {
       'type': 'function',
@@ -679,8 +745,8 @@ class NoteToolsHandler {
           'properties': {
             'capability': {
               'type': 'string',
-              'enum': ['notes', 'schedule', 'weather', 'apps', 'games', 'navigation', 'reports'],
-              'description': 'The capability needed: notes (save/manage notes), schedule (alerts/reminders), weather (forecasts), apps (open external apps), games (play games), navigation (app navigation), reports (AI news reports)',
+              'enum': ['notes', 'schedule', 'weather', 'apps', 'games', 'navigation', 'reports', 'inventory'],
+              'description': 'The capability needed: notes (save/manage notes), schedule (alerts/reminders), weather (forecasts), apps (open external apps), games (play games), navigation (app navigation), reports (AI news reports), inventory (store product locations, prices, stock)',
             },
           },
           'required': ['capability'],
@@ -771,6 +837,11 @@ class NoteToolsHandler {
       // App launcher
       case 'open_app':
         return await _openApp(toolCall.arguments);
+      // Store inventory
+      case 'search_inventory':
+        return _searchInventory(toolCall.arguments);
+      case 'get_product_details':
+        return _getProductDetails(toolCall.arguments);
       // Capability request (triggers retry with requested tools)
       case 'request_capability':
         return _requestCapability(toolCall.arguments);
@@ -1752,6 +1823,80 @@ class NoteToolsHandler {
   }
 
   /// Handle capability request - signals that we need to retry with additional tools
+  /// Find products by description, department, or aisle
+  AIToolResult _searchInventory(Map<String, dynamic> args) {
+    if (_inventoryProvider == null) {
+      return AIToolResult(
+        success: false,
+        message: 'Store inventory is not available.',
+      );
+    }
+
+    final aisle = (args['aisle'] as num?)?.toInt();
+    if (aisle != null) {
+      final inAisle = _inventoryProvider!.itemsInAisle(aisle);
+      return AIToolResult(
+        success: true,
+        message: inAisle.isEmpty
+            ? 'Nothing is stocked in aisle $aisle.'
+            : 'Aisle $aisle has ${inAisle.length} products.',
+        products: inAisle,
+      );
+    }
+
+    final query = (args['query'] as String?)?.trim() ?? '';
+    if (query.isEmpty) {
+      return AIToolResult(
+        success: false,
+        message: 'Ask the customer what product they are looking for.',
+      );
+    }
+
+    final matches = _inventoryProvider!.findProducts(
+      query,
+      department: args['department'] as String?,
+    );
+
+    if (matches.isEmpty) {
+      return AIToolResult(
+        success: true,
+        message: 'No products matching "$query" are in this store\'s inventory. Do not guess a location.',
+        products: [],
+      );
+    }
+
+    return AIToolResult(
+      success: true,
+      message: 'Found ${matches.length} matching product${matches.length == 1 ? '' : 's'}, best match first.',
+      products: matches,
+    );
+  }
+
+  /// Look up a single product by SKU
+  AIToolResult _getProductDetails(Map<String, dynamic> args) {
+    if (_inventoryProvider == null) {
+      return AIToolResult(
+        success: false,
+        message: 'Store inventory is not available.',
+      );
+    }
+
+    final sku = (args['sku'] as String?)?.trim() ?? '';
+    final item = _inventoryProvider!.getBySku(sku);
+    if (item == null) {
+      return AIToolResult(
+        success: false,
+        message: 'No product with SKU $sku. Use search_inventory to find it.',
+      );
+    }
+
+    return AIToolResult(
+      success: true,
+      message: '${item.name}: ${item.locationLabel}.',
+      products: [item],
+    );
+  }
+
   AIToolResult _requestCapability(Map<String, dynamic> args) {
     final capability = args['capability'] as String?;
 
@@ -1816,7 +1961,7 @@ class NoteToolsHandler {
 
     // === ALWAYS INCLUDED: Capabilities summary ===
     buffer.writeln();
-    buffer.writeln('YOUR CAPABILITIES: You can manage notes, set schedule alerts, check weather, open external apps, play games, access AI reports, and navigate the app.');
+    buffer.writeln('YOUR CAPABILITIES: You can manage notes, set schedule alerts, check weather, open external apps, play games, access AI reports, look up store inventory (product locations, prices, stock), and navigate the app.');
     buffer.writeln('If you need to do something but don\'t have the right tool, use request_capability to get it.');
 
     // === ALWAYS INCLUDED: Active note context (if present) ===
@@ -1875,6 +2020,12 @@ class NoteToolsHandler {
       buffer.writeln(_getReportsInstructions());
     }
 
+    // Store inventory instructions
+    if (activeIntents.contains(IntentCategory.inventory)) {
+      buffer.writeln();
+      buffer.writeln(_getInventoryInstructions());
+    }
+
     // General reminder (always)
     buffer.writeln();
     buffer.writeln('IMPORTANT: Don\'t read note content aloud unless asked. After creating notes or alerts, just confirm briefly.');
@@ -1903,6 +2054,24 @@ IMPORTANT: Use search_title to find notes by name. Don't say you can't update if
 - "show my schedule" → use show_schedule (just navigates)
 WORKFLOW: Use YYYY-MM-DD for date, HH:MM (24h) for time. For update/delete, get the alert_id first via list_alerts.
 TERMINOLOGY: Say "alert" or "schedule" not "reminder".''';
+  }
+
+  String _getInventoryInstructions() {
+    return '''STORE INVENTORY TOOLS (you are helping a shopper in the store):
+- "where are the deck screws?" → search_inventory(query="deck screws")
+- "do you have cordless drills?" → search_inventory(query="cordless drill")
+- "what's in aisle 12?" → search_inventory(aisle=12)
+- "how much is that one?" → get_product_details(sku) using the SKU from the earlier result
+HOW TO ANSWER:
+- ALWAYS search before answering. Never guess a location, price, or stock level.
+- Refer to products by spoken_name (e.g. "Exterior Deck Screws"), not the full catalog name with sizes like "#8 x 2-1/2 in.". Only give sizes if the customer asks, and say them in words ("two and a half inch").
+- Plain spoken sentences only: no asterisks, bold, bullet points, or lists.
+- Give the location as "Aisle X, Shelf Y, Bin Z". Lead with it - that's what they came for.
+- If quantity_in_stock is 0, say it's out of stock and offer an in-stock alternative from the results.
+- If stock is 4 or fewer, mention only a few are left.
+- If several products match, name the best one or two and ask which they need. Don't read the whole list.
+- If nothing matches, say the store doesn't appear to carry it and suggest asking a store associate.
+- Keep spoken answers short. Don't read SKUs aloud unless asked.''';
   }
 
   String _getWeatherInstructions() {
